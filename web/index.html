@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="SuperChat: one chat for flights, shopping and cinema.">
+<title>SuperChat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+body { margin: 0; }
+
+/* Layout: one-screen app — chat column + inspector column (routing decision, state); inspector hides on phones */
+:root {
+  --bg: #f3f5f4; --panel: #ffffff; --fg: #18211f; --muted: #5f6b68; --line: #dde3e1;
+  --accent: #0f6e63; --accent-ink: #ffffff; --bubble: #ffffff; --chip: #eef2f1;
+  --flights: #2a6fd6; --shopping: #b5651d; --cinema: #8a3fc9; --other: #6c7774;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111615; --panel: #182020; --fg: #e4ebe9; --muted: #9aa7a4; --line: #2a3533;
+  --accent: #3fb3a2; --accent-ink: #0b1312; --bubble: #1d2726; --chip: #1f2a29;
+  --flights: #6ea4f2; --shopping: #e09a55; --cinema: #b88ae6; --other: #8f9a97; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #111615; --panel: #182020; --fg: #e4ebe9; --muted: #9aa7a4; --line: #2a3533;
+  --accent: #3fb3a2; --accent-ink: #0b1312; --bubble: #1d2726; --chip: #1f2a29;
+  --flights: #6ea4f2; --shopping: #e09a55; --cinema: #b88ae6; --other: #8f9a97; color-scheme: dark; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+* { box-sizing: border-box; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 330px; height: 100%; max-width: 1240px; margin: 0 auto; }
+.chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--line); }
+header { display: flex; align-items: center; gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--line);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+header .sub { color: var(--muted); font-size: 13px; }
+.ref { margin-left: auto; font: 12px var(--mono); color: var(--muted); text-align: right; }
+#log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-block: 18px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.msg { max-width: min(78%, 640px); padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.user { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
+.bot { align-self: flex-start; background: var(--bubble); border: 1px solid var(--line); border-bottom-left-radius: 4px;
+  font-variant-numeric: tabular-nums; }
+.tag { display: inline-block; font: 600 11px var(--sans); letter-spacing: .05em; text-transform: uppercase; color: #fff;
+  background: var(--other); padding: 1px 8px; border-radius: 99px; margin-bottom: 6px; }
+.tag.flights { background: var(--flights); } .tag.shopping { background: var(--shopping); } .tag.cinema { background: var(--cinema); }
+form { display: flex; gap: 8px; padding-block: 12px; border-top: 1px solid var(--line); background: var(--panel);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+#q { flex: 1; min-width: 0; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; font: inherit;
+  background: var(--bg); color: var(--fg); }
+#q:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button { font: inherit; cursor: pointer; border-radius: 10px; }
+.send { padding: 10px 18px; border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.ghost { white-space: nowrap; padding: 7px 12px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; }
+aside { background: var(--panel); overflow-y: auto; padding: 16px; min-width: 0; }
+aside h2 { font: 600 11px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
+aside h2:first-child { margin-top: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 13px; padding: 5px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--chip); color: var(--fg); text-align: left; }
+.chip small { color: var(--muted); }
+pre { font: 11.5px/1.45 var(--mono); background: var(--bg); color: var(--fg); padding: 10px; border-radius: 8px; overflow-x: auto; margin: 0; max-height: 40vh; }
+.note { color: var(--muted); font-size: 12.5px; }
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } aside { display: none; } .msg { max-width: 92%; } .ref { display: none; } }
+@media (prefers-reduced-motion: no-preference) { #log { scroll-behavior: smooth; } }
+</style>
+</head>
+<body>
+
+
+<div class="app">
+  <section class="chat">
+    <header>
+      <div><h1>SuperChat</h1><div class="sub">Flights · Shopping · Cinema in one chat · EN / AZ / RU</div></div>
+      <div class="ref">Mock data · Mon 2 Nov 2026</div>
+      <button class="ghost" id="reset" type="button">New chat</button>
+    </header>
+    <div id="log" aria-live="polite"></div>
+    <form id="f"><label for="q" hidden>Message</label>
+      <input id="q" autocomplete="off" placeholder="Ask about flights, products or films…">
+      <button class="send" type="submit">Send</button></form>
+  </section>
+  <aside>
+    <h2>Try a conversation</h2>
+    <div class="chips" id="chips"></div>
+    <h2>Last routing decision</h2>
+    <pre id="route">Send a message to see how it was routed.</pre>
+    <h2>Session state</h2>
+    <pre id="state">—</pre>
+    <h2>About</h2>
+    <p class="note">The whole assistant runs in this page on the official mock dataset. Bookings are mock reservations: no payment, no personal data. Dates such as “tonight” or “Friday” are read against Monday 2 November 2026.</p>
+  </aside>
+</div>
+
+<script>window.SUPERCHAT_TABLES = {"lex": {"FLIGHT_STRONG": ["flights?\\b", "fly(?:ing)?\\b", "airlines?", "airports?", "planes?\\b", "aviasales", "layovers?", "round[- ]trip", "one[- ]way", "boarding", "(?:air|plane) tickets?", "ucus\\w*", "ucmaq\\w*", "ucag\\w*", "aviabilet\\w*", "aviasirket\\w*", "hava limani\\w*", "reys\\w*", "teyyare\\w*", "gedis[- ]qayidis", "рейс\\w*", "перел[её]т\\w*", "пол[её]т\\w*", "лет[еи]ть", "улет\\w*", "самол[её]т\\w*", "авиа\\w*", "аэропорт\\w*", "авиакомпани\\w*"], "SHOP_STRONG": ["buy(?:ing)?\\b", "purchase", "products?\\b", "shop(?:ping)?\\b", "(?:my |the )?cart\\b", "basket", "head\\s?phones?", "earbuds?", "earphones?", "speakers?\\b", "laptops?", "notebooks?\\b", "backpacks?", "bags?\\b", "(?:smart\\s?)?phones?\\b", "smart\\s?watch\\w*", "watches\\b", "power\\s?banks?", "gadgets?", "electronics", "shoes?\\b", "sneakers?", "coffee (?:machine|maker)s?", "espresso", "board games?", "gifts?\\b", "computers?", "birmarket", "in stock", "out of stock", "al(?:maq|mag|ir|im)\\b", "satin al\\w*", "sebet\\w*", "mehsul\\w*", "stokda", "anbarda", "qulaqliq\\w*", "qulaqciq\\w*", "noutbuk\\w*", "komputer\\w*", "canta\\w*", "telefon\\w*", "smartfon\\w*", "agilli saat\\w*", "dinamik\\w*", "elektronika", "ayaqqabi\\w*", "qehve\\w*", "stolustu oyun\\w*", "hediyye\\w*", "купить", "куплю", "покуп\\w*", "корзин\\w*", "товар\\w*", "в наличии", "наличи\\w*", "наушник\\w*", "ноутбук\\w*", "компьютер\\w*", "рюкзак\\w*", "сумк\\w*", "телефон\\w*", "смартфон\\w*", "умн\\w* час\\w*", "часы", "колонк\\w*", "электроник\\w*", "кроссовк\\w*", "обув\\w*", "кофемашин\\w*", "настольн\\w* игр\\w*", "подар\\w*"], "CINEMA_STRONG": ["movies?\\b", "films?\\b", "cinemas?", "cinemaplus", "playing\\b", "showing\\b", "showtimes?", "screenings?", "what'?s on\\b", "sci-?fi", "science fiction", "comed(?:y|ies)", "dramas?\\b", "thrillers?", "horror", "animat\\w*", "cartoons?", "romance", "romantic", "action (?:movie|film)s?", "adventure", "mystery", "family (?:movie|film)s?", "to watch\\b", "watch (?:a |an |some|something|tonight)", "izlemek\\w*", "baxmaq\\w*", "посмотреть", "film\\w*", "kino\\w*", "seans\\w*", "ne gedir", "neler gedir", "elmi[- ]?fantasti\\w*", "fantasti\\w*", "komedi\\w*", "dram\\b", "triller\\w*", "qorxu film\\w*", "cizgi film\\w*", "romanti\\w*", "dovus\\w*", "фильм\\w*", "кино\\w*", "кинотеатр\\w*", "сеанс\\w*", "ид[её]т\\b", "показыва\\w*", "фантастик\\w*", "комеди\\w*", "драм\\w*", "триллер\\w*", "ужас\\w*", "мульт\\w*", "мелодрам\\w*", "боевик\\w*", "приключен\\w*", "детектив\\w*", "мистик\\w*", "macera\\w*", "sirr\\w*"], "FLIGHT_WEAK": ["direct\\b", "non-?stop", "stops?\\b", "baggage", "luggage", "depart\\w*", "arriv\\w*", "birbasa", "aktarma\\w*", "baqaj\\w*", "yuk\\b", "прям\\w*", "пересадк\\w*", "багаж\\w*", "вылет\\w*", "прил[её]т\\w*"], "SHOP_WEAK": ["do you (?:have|sell)", "sell\\b", "satirsiniz", "продаете", "продаёте", "stock\\b", "available\\b", "add\\b", "remove\\b", "brand\\w*", "colou?r\\w*", "warranty", "elave et\\w*", "sil\\b", "rengi?\\w*", "marka\\w*", "var ?mi", "добав\\w*", "удал\\w*", "убер\\w*", "цвет\\w*", "бренд\\w*", "есть ли"], "CINEMA_WEAK": ["hall\\b", "zal\\b", "зал\\b", "subtit\\w*"], "BOOKING": ["book\\w*", "reserve\\w*", "reservation", "tickets?", "seats?\\b", "bron\\w*", "rezerv\\w*", "bilet\\w*", "yer\\b", "yerler\\w*", "заброн\\w*", "бронир\\w*", "бронь", "билет\\w*", "мест[аоу]?\\b"], "FOLLOWUP": ["(?:the|that|this) (?:[\\w-]+ )?one\\b", "(?:cheap|expensive|direct|earl|lat|fast|short)\\w* one\\b", "\\bit\\b", "\\bthem\\b", "\\bthat\\b", "\\bthose\\b", "\\bthis one", "the same", "and (?:for|on|what|how)\\b", "what about", "how about", "back to", "go back", "return to", "cheaper", "cheapest", "instead", "is it\\b", "are they", "more expensive", "which one", "another", "onu\\b", "bunu\\b", "o\\b", "hemin", "bes\\b", "ucuz olan\\w*", "daha ucuz\\w*", "en ucuz\\w*", "geri qayid\\w*", "qayidaq", "ikincisi\\w*", "birincisi\\w*", "sonuncusu\\w*", "его\\b", "е[её]\\b", "их\\b", "этот", "эта", "это", "тот\\b", "та\\b", "а (?:на|в|что|как)\\b", "подешевле", "дешевле", "самый дешев\\w*", "вернемся", "вернёмся", "назад к", "а если"], "VAGUE": ["something", "anything", "recommend\\w*", "suggest\\w*", "surprise me", "show me (?:something|what)", "what do you have", "what can you", "help me", "i want to book", "book it", "i'?m bored", "bir sey", "ne(?:ler)? var", "meslehet\\w*", "tovsiye\\w*", "teklif\\w*", "darixir\\w*", "что[- ]нибудь", "что[- ]то", "посовету\\w*", "порекоменду\\w*", "предлож\\w*", "скучно", "how much", "price\\b", "qiymet\\w*", "сколько стоит", "цен[аы]"], "GREETING": ["hi\\b", "hello", "hey\\b", "good (?:morning|evening|afternoon)", "salam", "sabahiniz", "привет", "здравствуй\\w*", "добрый (?:день|вечер)", "thanks?\\b", "thank you", "sag ?ol", "tesekkur\\w*", "спасибо"], "OUT_OF_SCOPE": ["weather", "forecast", "temperature", "news\\b", "football", "recipe", "joke", "hotels?\\b", "taxi", "translate", "homework", "stocks? market", "bitcoin", "exchange rate", "hava (?:nec|nece|necedir|proqnoz\\w*|haqqinda)", "hava\\b(?! limani)", "xeber\\w*", "futbol\\w*", "resept\\w*", "zarafat\\w*", "otel\\w*", "taksi\\w*", "мезенн\\w*", "погод\\w*", "новост\\w*", "футбол\\w*", "рецепт\\w*", "анекдот\\w*", "шутк\\w*", "отел[ья]\\w*", "гостиниц\\w*", "такси", "курс (?:валют|доллар)\\w*"]}, "flights": {"RESERVE": ["book\\w*", "reserve\\w*", "bron\\w*", "rezerv\\w*", "заброн\\w*", "бронир\\w*", "оформ\\w*", "i'?ll take", "götür", "gotur\\w*", "бер[уё]"], "COMPARE": ["compar\\w*", "vs\\b", "versus", "difference", "muqayis\\w*", "ferq\\w*", "сравн\\w*", "разниц\\w*"], "DIRECT": ["direct\\w*", "non-?stop", "birbasa", "aktarmasiz", "прям\\w*", "без пересад\\w*"], "CHEAP": ["cheap\\w*", "lowest price", "ucuz\\w*", "дешев\\w*", "подешевле"], "FAST": ["fast\\w*", "shortest", "quick\\w*", "en tez", "en qisa", "быстр\\w*", "короч\\w*"], "EARLY": ["earliest", "en erken", "самый ранн\\w*"], "MORNING": ["morning", "seher\\w*", "утр\\w*"], "AFTERNOON": ["afternoon", "gunorta\\w*", "днем", "днём"], "EVENING": ["evening", "night", "axsam\\w*", "gece\\w*", "вечер\\w*", "ноч\\w*"], "SELECT_WORDS": ["cheap\\w*", "lowest price", "ucuz\\w*", "дешев\\w*", "подешевле", "direct\\w*", "non-?stop", "birbasa", "aktarmasiz", "прям\\w*", "без пересад\\w*", "fast\\w*", "shortest", "quick\\w*", "en tez", "en qisa", "быстр\\w*", "короч\\w*", "earliest", "en erken", "самый ранн\\w*", "morning", "seher\\w*", "утр\\w*", "evening", "night", "axsam\\w*", "gece\\w*", "вечер\\w*", "ноч\\w*", "(?:the|that|this) (?:[\\w-]+ )?one", "\\bone\\b", "olan", "тот", "этот"], "RETURN": ["return\\w*", "round[- ]trip", "back on", "come back", "geri", "qayid\\w*", "gedis[- ]qayidis", "обратн\\w*", "туда и обратно", "вернуться"], "FLIGHTISH": ["flights?", "ucus\\w*", "reys\\w*", "рейс\\w*", "перел[её]т\\w*"], "STR": {"need_route": {"en": "Where would you like to fly, and on which date? For example: “Baku to Istanbul on Friday”.", "az": "Hara və hansı tarixə uçmaq istəyirsiniz? Məsələn: “Cümə günü Bakıdan İstanbula”.", "ru": "Куда и на какую дату вы хотите лететь? Например: «Баку — Стамбул в пятницу»."}, "need_date": {"en": "Which date should I check for {route}?", "az": "{route} üçün hansı tarixi yoxlayım?", "ru": "На какую дату проверить {route}?"}, "unknown_city": {"en": "I only have flights between these cities: {cities}.", "az": "Məndə yalnız bu şəhərlər arasında uçuşlar var: {cities}.", "ru": "У меня есть рейсы только между этими городами: {cities}."}, "results": {"en": "Flights {route}, {date}:", "az": "{route} uçuşları, {date}:", "ru": "Рейсы {route}, {date}:"}, "results_nodate": {"en": "Flights {route}:", "az": "{route} uçuşları:", "ru": "Рейсы {route}:"}, "none": {"en": "I found no flights {route} on {date}{filters}.", "az": "{date} tarixində {route} üzrə uçuş tapılmadı{filters}.", "ru": "Рейсов {route} на {date} не найдено{filters}."}, "other_dates": {"en": "This route does fly on: {dates}.", "az": "Bu istiqamətdə uçuş tarixləri: {dates}.", "ru": "По этому направлению есть рейсы: {dates}."}, "no_route": {"en": "There are no flights on this route in my data.", "az": "Məlumatlarımda bu istiqamət üzrə uçuş yoxdur.", "ru": "В моих данных нет рейсов по этому направлению."}, "filtered": {"en": " with these filters", "az": " (seçilmiş filtrlərlə)", "ru": " с этими фильтрами"}, "direct": {"en": "direct", "az": "birbaşa", "ru": "прямой"}, "stops": {"en": "{n} stop via {via}", "az": "{n} aktarma ({via})", "ru": "{n} пересадка ({via})"}, "seats": {"en": "seats left: {n}", "az": "{n} yer qalıb", "ru": "осталось мест: {n}"}, "sold_out": {"en": "sold out", "az": "yer qalmayıb", "ru": "мест нет"}, "pick_hint": {"en": "Say “the cheaper one”, “the second one” or “book the first one”.", "az": "“Ucuz olanı”, “ikincini” və ya “birincini bron et” yaza bilərsiniz.", "ru": "Напишите «подешевле», «второй» или «забронируй первый»."}, "details": {"en": "{airline} {fn}, {date}\n• {dep} {o} → {arr} {d} ({dur})\n• {stops}\n• Baggage: {bag} kg, {cabin}\n• {seats}\n• Price: {price}", "az": "{airline} {fn}, {date}\n• {dep} {o} → {arr} {d} ({dur})\n• {stops}\n• Baqaj: {bag} kq, {cabin}\n• {seats}\n• Qiymət: {price}", "ru": "{airline} {fn}, {date}\n• {dep} {o} → {arr} {d} ({dur})\n• {stops}\n• Багаж: {bag} кг, {cabin}\n• {seats}\n• Цена: {price}"}, "is_direct_yes": {"en": "Yes, it is a direct flight.", "az": "Bəli, birbaşa uçuşdur.", "ru": "Да, это прямой рейс."}, "is_direct_no": {"en": "No, it has {n} stop in {via}.", "az": "Xeyr, {via} şəhərində {n} aktarma var.", "ru": "Нет, у него {n} пересадка в {via}."}, "selected_cheapest": {"en": "The cheapest option is:", "az": "Ən ucuz variant:", "ru": "Самый дешёвый вариант:"}, "which_flight": {"en": "Which flight should I book? Tell me its number in the list.", "az": "Hansı uçuşu bron edim? Siyahıdakı nömrəsini yazın.", "ru": "Какой рейс забронировать? Назовите номер в списке."}, "booked": {"en": "Reserved ✅ {fn} on {date}, {n} passenger(s), total {total}. Reference {ref}. (Mock reservation — no payment taken.)", "az": "Bron edildi ✅ {fn}, {date}, {n} sərnişin, cəmi {total}. Kod: {ref}. (Test bronu — ödəniş alınmır.)", "ru": "Забронировано ✅ {fn}, {date}, пассажиров: {n}, итого {total}. Номер брони {ref}. (Тестовая бронь — без оплаты.)"}, "not_enough": {"en": "Sorry, only {n} seat(s) left on {fn}.", "az": "Təəssüf ki, {fn} reysində cəmi {n} yer qalıb.", "ru": "К сожалению, на {fn} осталось мест: {n}."}, "compare_head": {"en": "Comparison:", "az": "Müqayisə:", "ru": "Сравнение:"}, "compare_best": {"en": "Cheapest: {c}. Fastest: {f}.", "az": "Ən ucuz: {c}. Ən sürətli: {f}.", "ru": "Самый дешёвый: {c}. Самый быстрый: {f}."}, "return_head": {"en": "Return {route}, {date}:", "az": "Geri dönüş {route}, {date}:", "ru": "Обратно {route}, {date}:"}, "assume_origin": {"en": " (from Baku)", "az": " (Bakıdan)", "ru": " (из Баку)"}}}, "shopping": {"CART": ["cart", "basket", "sebet\\w*", "корзин\\w*"], "ADD": ["add\\w*", "put (?:it|this|them)", "buy\\b", "i'?ll take", "elave\\w*", "sebete at\\w*", "al\\b", "alim", "gotur\\w*", "добав\\w*", "полож\\w*", "возьму", "куплю", "купить"], "REMOVE": ["remove\\w*", "delete\\w*", "take out", "drop\\b", "sil\\w*", "cixar\\w*", "удал\\w*", "убер\\w*", "убрать"], "STOCK": ["in stock", "stock\\b", "available", "availability", "stokda", "anbarda", "var ?mi", "movcud\\w*", "в наличии", "наличи\\w*", "есть ли", "есть в"], "COMPARE": ["compar\\w*", "vs\\b", "versus", "difference", "muqayis\\w*", "ferq\\w*", "сравн\\w*", "разниц\\w*"], "CHEAP": ["cheap\\w*", "ucuz\\w*", "дешев\\w*", "подешевле"], "BEST": ["best", "top[- ]rated", "highest rat\\w*", "en yaxsi", "лучш\\w*"], "EXPENSIVE": ["expensive", "premium", "baha\\w*", "дорог\\w*"], "SEARCH": ["do you have", "have you got", "show\\b", "find", "search", "looking for", "any\\b", "need\\b", "want", "istey\\w*", "istiy\\w*", "хочу", "нуж[ео]н\\w*", "var ?mi", "varmi", "goster\\w*", "axtar\\w*", "tap\\b", "есть\\b", "покаж\\w*", "найд\\w*", "ищу", "нужн\\w*"], "BACK": ["back to", "go back", "return to", "geri qayid\\w*", "qayidaq", "вернемся", "вернёмся", "назад к"], "STR": {"need_query": {"en": "What are you looking for? I can search headphones, laptops, backpacks, phones, smartwatches and more.", "az": "Nə axtarırsınız? Qulaqlıq, noutbuk, çanta, telefon, ağıllı saat və s. axtara bilərəm.", "ru": "Что вы ищете? Могу найти наушники, ноутбуки, рюкзаки, телефоны, умные часы и другое."}, "not_found": {"en": "Sorry, I couldn’t find that in the catalogue. I have headphones and earbuds, a speaker, laptops, smartphones, a smartwatch, a backpack, running shoes, a coffee machine and a board game.", "az": "Bağışlayın, bunu kataloqda tapmadım. Məndə qulaqlıq, dinamik, noutbuk, smartfon, ağıllı saat, çanta, qaçış ayaqqabısı, qəhvə maşını və stolüstü oyun var.", "ru": "Извините, этого нет в каталоге. Есть наушники, колонка, ноутбуки, смартфоны, умные часы, рюкзак, кроссовки, кофемашина и настольная игра."}, "results": {"en": "Here is what I found{cond}:", "az": "Tapdıqlarım{cond}:", "ru": "Вот что нашлось{cond}:"}, "again": {"en": "Back to your earlier list{cond}:", "az": "Əvvəlki siyahınız{cond}:", "ru": "Возвращаемся к вашему списку{cond}:"}, "selected_note": {"en": "You were looking at: {name}.", "az": "Baxdığınız məhsul: {name}.", "ru": "Вы смотрели: {name}."}, "under": {"en": " under {v}", "az": " ({v}-dən ucuz)", "ru": " до {v}"}, "over": {"en": " over {v}", "az": " ({v}-dən baha)", "ru": " от {v}"}, "none": {"en": "Sorry, nothing in the catalogue matches{cond}.", "az": "Təəssüf ki, kataloqda uyğun məhsul yoxdur{cond}.", "ru": "К сожалению, в каталоге ничего не подходит{cond}."}, "closest": {"en": "Closest options in that category:", "az": "Bu kateqoriyada ən yaxın variantlar:", "ru": "Ближайшие варианты в этой категории:"}, "in_stock": {"en": "in stock ({n})", "az": "stokda var ({n})", "ru": "в наличии ({n})"}, "out_stock": {"en": "out of stock", "az": "stokda yoxdur", "ru": "нет в наличии"}, "stock_yes": {"en": "Yes — {name} is in stock: {n} available.", "az": "Bəli — {name} stokda var: {n} ədəd.", "ru": "Да — {name} в наличии: {n} шт."}, "stock_no": {"en": "Sorry, {name} is currently out of stock.", "az": "Təəssüf ki, {name} hazırda stokda yoxdur.", "ru": "К сожалению, {name} сейчас нет в наличии."}, "details": {"en": "{name} — {brand}\n• Price: {price}\n• Rating: ★{rating}\n• Colour: {color}\n• Stock: {stock}\n• {desc}", "az": "{name} — {brand}\n• Qiymət: {price}\n• Reytinq: ★{rating}\n• Rəng: {color}\n• Stok: {stock}\n• {desc}", "ru": "{name} — {brand}\n• Цена: {price}\n• Рейтинг: ★{rating}\n• Цвет: {color}\n• Наличие: {stock}\n• {desc}"}, "which": {"en": "Which product do you mean? Say “the first one” or its name.", "az": "Hansı məhsulu nəzərdə tutursunuz? “Birincini” və ya adını yazın.", "ru": "Какой товар вы имеете в виду? Скажите «первый» или название."}, "added": {"en": "Added {n} × {name} to your cart. Cart total: {total}.", "az": "Səbətə əlavə edildi: {n} × {name}. Səbət cəmi: {total}.", "ru": "Добавлено в корзину: {n} × {name}. Сумма корзины: {total}."}, "add_oos": {"en": "{name} is out of stock, so I can’t add it to the cart.", "az": "{name} stokda yoxdur, səbətə əlavə edə bilmirəm.", "ru": "{name} нет в наличии, поэтому добавить в корзину нельзя."}, "add_limit": {"en": "Only {n} of {name} in stock.", "az": "{name} üçün stokda cəmi {n} ədəd var.", "ru": "{name} в наличии только {n} шт."}, "removed": {"en": "Removed {name} from your cart. Cart total: {total}.", "az": "{name} səbətdən silindi. Səbət cəmi: {total}.", "ru": "{name} удалён из корзины. Сумма корзины: {total}."}, "not_in_cart": {"en": "That item is not in your cart.", "az": "Bu məhsul səbətinizdə yoxdur.", "ru": "Этого товара нет в корзине."}, "cart_empty": {"en": "Your cart is empty.", "az": "Səbətiniz boşdur.", "ru": "Ваша корзина пуста."}, "cart": {"en": "Your cart:", "az": "Səbətiniz:", "ru": "Ваша корзина:"}, "total": {"en": "Total: {total}", "az": "Cəmi: {total}", "ru": "Итого: {total}"}, "compare_head": {"en": "Comparison:", "az": "Müqayisə:", "ru": "Сравнение:"}, "compare_best": {"en": "Cheapest: {c}. Best rated: {r}.", "az": "Ən ucuz: {c}. Ən yüksək reytinq: {r}.", "ru": "Самый дешёвый: {c}. Лучший рейтинг: {r}."}, "pick_hint": {"en": "Ask “is the second one in stock?”, “compare them” or “add the first one to my cart”.", "az": "“İkinci stokda var?”, “müqayisə et” və ya “birincini səbətə at” yaza bilərsiniz.", "ru": "Спросите «второй есть в наличии?», «сравни их» или «добавь первый в корзину»."}}, "TYPES": {"headphones": ["head\\s?phones?", "earbuds?", "earphones?", "qulaqliq\\w*", "qulaqciq\\w*", "наушник\\w*"], "speaker": ["speakers?", "dinamik\\w*", "колонк\\w*"], "laptops": ["laptops?", "notebooks?", "noutbuk\\w*", "komputer\\w*", "ноутбук\\w*", "компьютер\\w*", "computers?"], "bags": ["backpacks?", "bags?\\b", "canta\\w*", "рюкзак\\w*", "сумк\\w*"], "shoes": ["shoes?", "sneakers?", "trainers?", "ayaqqabi\\w*", "krossovk\\w*", "кроссовк\\w*", "обув\\w*"], "coffee": ["coffee", "espresso", "qehve\\w*", "кофе\\w*"], "games": ["board games?", "games?\\b", "gifts?", "oyun\\w*", "hediyye\\w*", "настольн\\w*", "игр\\w*", "подар\\w*"], "phones": ["(?:smart\\s?)?phones?\\b", "telefon\\w*", "smartfon\\w*", "телефон\\w*", "смартфон\\w*"], "wearables": ["smart\\s?watch\\w*", "watches", "agilli saat\\w*", "умн\\w* час\\w*", "часы"], "accessories": ["accessor\\w*", "aksesuar\\w*", "аксессуар\\w*"], "audio": ["audio", "sound", "аудио"]}, "COLORS": {"black": ["black", "qara", "черн\\w*", "чёрн\\w*"], "white": ["white", "ag\\b", "бел\\w*"], "silver": ["silver", "gumus\\w*", "серебр\\w*"], "grey": ["gr[ae]y", "boz", "сер(?:ый|ая|ого|ые|ую)"], "blue": ["blue", "goy\\b", "син\\w*", "голуб\\w*"], "pink": ["pink", "cehrayi", "розов\\w*"], "red": ["red\\b", "qirmizi", "красн\\w*"], "multicolor": ["multicolou?r\\w*", "colou?rful", "rengareng", "разноцветн\\w*"]}}, "cinema": {"RESERVE": ["book\\w*", "reserve\\w*", "bron\\w*", "rezerv\\w*", "заброн\\w*", "бронир\\w*", "buy tickets?", "bilet al\\w*", "купи\\w* билет\\w*", "i'?ll take"], "SEATS": ["seats?", "available", "yer\\w*", "мест\\w*", "свободн\\w*", "tickets? left", "sold out"], "PRICE": ["price", "how much", "cost", "qiymet\\w*", "necey\\w*", "сколько стоит", "цен\\w*", "стоимост\\w*"], "SHOWTIMES": ["showtimes?", "when\\b", "what time", "times?\\b", "schedule", "seans\\w*", "ne vaxt", "saat nec\\w*", "сеанс\\w*", "когда", "во сколько", "расписан\\w*", "where\\b", "harada", "где"], "TOP": ["best", "top", "highest", "en yaxsi", "лучш\\w*", "высок\\w* рейтинг"], "STR": {"playing": {"en": "Showing {date}:", "az": "{date} nümayiş olunur:", "ru": "В прокате {date}:"}, "films": {"en": "Films{cond}:", "az": "Filmlər{cond}:", "ru": "Фильмы{cond}:"}, "nothing_date": {"en": "Nothing{cond} is showing on {date}.", "az": "{date} tarixində{cond} film yoxdur.", "ru": "На {date}{cond} сеансов нет."}, "no_films": {"en": "No films match{cond}.", "az": "Uyğun film tapılmadı{cond}.", "ru": "Подходящих фильмов нет{cond}."}, "film_line_hint": {"en": "Ask for showtimes, seats or “book 2 tickets for the first one”.", "az": "Seanslar, boş yerlər və ya “birinciyə 2 bilet bron et” soruşa bilərsiniz.", "ru": "Спросите о сеансах, местах или «забронируй 2 билета на первый»."}, "showtimes_for": {"en": "{title} — showtimes{date}:", "az": "{title} — seanslar{date}:", "ru": "{title} — сеансы{date}:"}, "no_showtimes": {"en": "{title} has no showtimes{date}.", "az": "{title} filminin{date} seansı yoxdur.", "ru": "У фильма {title} нет сеансов{date}."}, "other_days": {"en": "It is showing on: {dates}.", "az": "Nümayiş tarixləri: {dates}.", "ru": "Сеансы есть: {dates}."}, "seats": {"en": "{n} seats free", "az": "{n} boş yer", "ru": "свободно мест: {n}"}, "sold_out": {"en": "sold out", "az": "yer yoxdur", "ru": "мест нет"}, "which_film": {"en": "Which film would you like to book?", "az": "Hansı filmə bilet bron edim?", "ru": "На какой фильм забронировать?"}, "which_show": {"en": "Which showtime should I book? Reply with its number.", "az": "Hansı seansı bron edim? Nömrəsini yazın.", "ru": "Какой сеанс забронировать? Укажите номер."}, "several_genre": {"en": "Two or more {genre} films match — {titles}. Here are their options:", "az": "Bir neçə {genre} filmi var — {titles}. Variantlar:", "ru": "Подходит несколько фильмов жанра {genre} — {titles}. Варианты:"}, "booked": {"en": "Booked ✅ {n} ticket(s) for {title}, {date} {time}, {cinema} ({hall}). Total {total}. Reference {ref}. (Mock booking — no payment.)", "az": "Bron edildi ✅ {title}, {date} {time}, {cinema} ({hall}) — {n} bilet. Cəmi {total}. Kod: {ref}. (Test bronu — ödəniş yoxdur.)", "ru": "Забронировано ✅ {n} билет(а) на {title}, {date} {time}, {cinema} ({hall}). Итого {total}. Номер брони {ref}. (Тестовая бронь — без оплаты.)"}, "not_enough": {"en": "Sorry, only {n} seat(s) left for that showtime.", "az": "Təəssüf ki, bu seansda cəmi {n} yer qalıb.", "ru": "К сожалению, на этот сеанс осталось мест: {n}."}, "details": {"en": "{title} ({year_genre}) · {language} · {dur} min · {age} · ★{rating}\n{syn}", "az": "{title} ({year_genre}) · {language} · {dur} dəq · {age} · ★{rating}\n{syn}", "ru": "{title} ({year_genre}) · {language} · {dur} мин · {age} · ★{rating}\n{syn}"}, "cinemas": {"en": "Our cinemas:", "az": "Kinoteatrlarımız:", "ru": "Наши кинотеатры:"}, "seat_answer": {"en": "{when}: {seats}, {price} per ticket.", "az": "{when}: {seats}, bilet {price}.", "ru": "{when}: {seats}, билет {price}."}, "on": {"en": " on {d}", "az": " {d}", "ru": " на {d}"}, "tonight": {"en": "tonight", "az": "bu axşam", "ru": "сегодня"}}, "GENRES": {"sci-fi": ["sci-?fi", "science fiction", "scifi", "elmi[- ]?fantasti\\w*", "fantasti\\w*", "фантастик\\w*"], "comedy": ["comed\\w*", "funny", "komedi\\w*", "комеди\\w*"], "drama": ["drama\\w*", "dram\\b", "драм\\w*"], "thriller": ["thriller\\w*", "triller\\w*", "триллер\\w*"], "horror": ["horror", "scary", "qorxu\\w*", "ужас\\w*", "хоррор\\w*"], "animation": ["animat\\w*", "cartoon\\w*", "cizgi\\w*", "анимац\\w*", "мульт\\w*"], "romance": ["roman(?:ce|tic)\\w*", "romanti\\w*", "мелодрам\\w*", "романти\\w*"], "action": ["action", "dovus\\w*", "ekshn", "боевик\\w*", "экшн"], "adventure": ["adventure\\w*", "macera\\w*", "приключен\\w*"], "mystery": ["myster\\w*", "sirli", "детектив\\w*", "мистик\\w*", "загадочн\\w*"], "crime": ["crime", "cinayet\\w*", "криминал\\w*"], "family": ["family", "kids", "children", "aile\\w*", "usaq\\w*", "семейн\\w*", "детск\\w*", "для детей"]}, "LANGS": {"English": ["english", "ingilis\\w*", "англ\\w*"], "Azerbaijani": ["azerbaijani", "azeri", "azerbaycan\\w*", "азербайджан\\w*", "азерб\\w*"], "Russian": ["russian", "rus dil\\w*", "rusca", "русск\\w*", "на русском"]}}, "app": {"TEXT": {"greeting": {"en": "Hi! I’m SuperChat. I can find flights ✈️, products 🛍️ and cinema showtimes 🎬 — just ask in one chat.", "az": "Salam! Mən SuperChat-am. Uçuşlar ✈️, məhsullar 🛍️ və kino seansları 🎬 üzrə kömək edə bilərəm.", "ru": "Привет! Я SuperChat. Помогу с авиабилетами ✈️, товарами 🛍️ и сеансами в кино 🎬 — всё в одном чате."}, "oos": {"en": "Sorry, I can’t help with that. I can search flights, shop for products, or find films and showtimes.", "az": "Bağışlayın, bu mövzuda kömək edə bilmirəm. Uçuş, məhsul və ya kino seansı axtara bilərəm.", "ru": "Извините, с этим я помочь не могу. Я ищу авиабилеты, товары, фильмы и сеансы."}, "ambiguous": {"en": "Do you mean a flight, a product, or a film?", "az": "Uçuşu, məhsulu, yoxsa filmi nəzərdə tutursunuz?", "ru": "Вы имеете в виду рейс, товар или фильм?"}, "ambiguous_book": {"en": "What should I book{n} — a flight or a film? If a film, which one and when?", "az": "Nəyi bron edim{n} — uçuş, yoxsa film? Filmdirsə, hansı və nə vaxt?", "ru": "Что забронировать{n} — рейс или фильм? Если фильм — какой и когда?"}, "ambiguous_ctx": {"en": "Do you mean the {a} or the {b}?", "az": "{a}, yoxsa {b} nəzərdə tutursunuz?", "ru": "Вы про {a} или про {b}?"}, "dom": {"en": {"flights": "flight", "shopping": "products", "cinema": "film"}, "az": {"flights": "uçuşu", "shopping": "məhsulu", "cinema": "filmi"}, "ru": {"flights": "рейс", "shopping": "товары", "cinema": "фильм"}}, "error": {"en": "Sorry, I couldn’t reach that service just now. Please try again in a moment.", "az": "Bağışlayın, xidmətə hazırda qoşulmaq alınmadı. Bir az sonra yenidən cəhd edin.", "ru": "Извините, сервис сейчас недоступен. Попробуйте ещё раз чуть позже."}}, "HEAD": {"flights": "✈️", "shopping": "🛍️", "cinema": "🎬"}}, "nlp": {"MONTHS": {"1": "(?:jan(?:uary)?|yanvar\\w*|январ\\w*)", "2": "(?:feb(?:ruary)?|fevral\\w*|феврал\\w*)", "3": "(?:mar(?:ch)?|mart\\w*|март\\w*)", "4": "(?:apr(?:il)?|aprel\\w*|апрел\\w*)", "5": "(?:may|мая|май)", "6": "(?:june?|iyun\\w*|июн\\w*)", "7": "(?:july?|iyul\\w*|июл\\w*)", "8": "(?:aug(?:ust)?|avqust\\w*|август\\w*)", "9": "(?:sep(?:t(?:ember)?)?|sentyabr\\w*|сентябр\\w*)", "10": "(?:oct(?:ober)?|oktyabr\\w*|октябр\\w*)", "11": "(?:nov(?:ember)?|noyabr\\w*|ноябр\\w*)", "12": "(?:dec(?:ember)?|dekabr\\w*|декабр\\w*)"}, "WEEKDAYS": [["bazar ertesi\\w*", 0], ["cersenbe axsami\\w*", 1], ["cume axsami\\w*", 3], ["(?:monday|понедельник\\w*)", 0], ["(?:tuesday|вторник\\w*)", 1], ["(?:wednesday|cersenbe\\w*|сред[ауы])", 2], ["(?:thursday|четверг\\w*)", 3], ["(?:friday|cume\\w*|пятниц\\w*)", 4], ["(?:saturday|senbe\\w*|суббот\\w*)", 5], ["(?:sunday|bazar(?:\\s+gunu)?|воскресень\\w*)", 6]], "TODAY": "(?:tonight|today|this evening|bu gun\\w*|bu axsam|bu gece|сегодня|вечером|этим вечером)", "TOMORROW": "(?:tomorrow|sabah(?:a|ki)?|завтра)", "NUM_WORDS": {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "bir": 1, "iki": 2, "uc": 3, "dord": 4, "bes": 5, "alti": 6, "один": 1, "одна": 1, "одно": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6}, "COUNT_NOUNS": "(?:seats?|tickets?|people|persons?|passengers?|adults?|pcs|pieces?|units?|x|yer|bilet|nefer|ededi?|eded|мест[ао]?|билет(?:а|ов)?|человек[а]?|пассажир(?:а|ов)?|штук[и]?)", "ORDINALS": [["(?:first|1st|birinci\\w*|перв\\w*)", 0], ["(?:second|2nd|ikinci\\w*|втор\\w*)", 1], ["(?:third|3rd|ucuncu\\w*|трет\\w*)", 2], ["(?:fourth|4th|dorduncu\\w*|четв[её]рт\\w*)", 3], ["(?:fifth|5th|besinci\\w*|пят(?:ый|ая|ое|ую))", 4], ["(?:last|sonuncu\\w*|axirinci\\w*|последн\\w*)", -1]], "AZ_WORDS": ["axsam", "bakidan", "bazar", "beli", "bilet", "birinci", "bron", "bu", "cant", "canta", "cume", "daha", "elave", "et", "film", "filmler", "gedir", "goster", "hansi", "hava", "ikinci", "ile", "istanbula", "isteyirem", "istiyirem", "kino", "lazim", "lazimdir", "mene", "menim", "ne", "nece", "neche", "nedir", "neler", "noutbuk", "noyabr", "olan", "olmasa", "qulaqliq", "rezerv", "sabah", "sagol", "salam", "sebet", "senbe", "sonuncu", "stokda", "tap", "tapin", "tesekkur", "ucun", "ucuncu", "ucus", "ucuslar", "ucusu", "ucuz", "var", "varmi", "ve", "xeyr", "yer", "yerler", "zehmet"], "EN_WORDS": ["and", "any", "book", "cart", "cheaper", "do", "find", "flight", "flights", "for", "from", "have", "hello", "hi", "how", "in", "is", "it", "me", "much", "one", "playing", "please", "seats", "show", "stock", "the", "to", "tonight", "under", "what", "you"]}, "entities": {"CITY_ALIASES": {"GYD": ["baku", "baki\\w*", "баку", "gyd"], "IST": ["istanbul\\w*", "стамбул\\w*", "ist\\b"], "DXB": ["dubai", "dubay\\w*", "дубай\\w*", "dxb"], "SVO": ["moscow", "moskva\\w*", "москв\\w*", "svo"], "TBS": ["tbilisi\\w*", "tiflis\\w*", "тбилиси", "tbs"], "LHR": ["london\\w*", "лондон\\w*", "lhr"], "TAS": ["tashkent\\w*", "taskent\\w*", "ташкент\\w*", "tas\\b"]}, "BASE_FORMS": ["baki", "baku", "dubai", "dubay", "istanbul", "london", "moskva", "tashkent", "taskent", "tbilisi", "tiflis"], "TITLE_STOP": ["deep", "iron", "last", "laugh", "midnight", "paper", "spring", "track", "zero"]}, "data": {"flights": [{"id": "F001", "airline": "Caspian Air", "flight_number": "CA101", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "IST", "city": "Istanbul"}, "departure_local": "2026-11-06T07:30", "arrival_local": "2026-11-06T10:05", "duration_min": 215, "stops": 0, "via": null, "price_azn": 289.0, "cabin": "economy", "baggage_kg": 20, "seats_available": 14}, {"id": "F002", "airline": "Bosphor Air", "flight_number": "BA220", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "IST", "city": "Istanbul"}, "departure_local": "2026-11-06T14:20", "arrival_local": "2026-11-06T17:00", "duration_min": 220, "stops": 0, "via": null, "price_azn": 245.0, "cabin": "economy", "baggage_kg": 15, "seats_available": 3}, {"id": "F003", "airline": "Caspian Air", "flight_number": "CA103", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "IST", "city": "Istanbul"}, "departure_local": "2026-11-07T06:10", "arrival_local": "2026-11-07T08:45", "duration_min": 215, "stops": 0, "via": null, "price_azn": 310.0, "cabin": "economy", "baggage_kg": 20, "seats_available": 22}, {"id": "F004", "airline": "Bosphor Air", "flight_number": "BA221", "origin": {"code": "IST", "city": "Istanbul"}, "destination": {"code": "GYD", "city": "Baku"}, "departure_local": "2026-11-09T15:30", "arrival_local": "2026-11-09T22:05", "duration_min": 215, "stops": 0, "via": null, "price_azn": 275.0, "cabin": "economy", "baggage_kg": 15, "seats_available": 9}, {"id": "F005", "airline": "Caspian Air", "flight_number": "CA104", "origin": {"code": "IST", "city": "Istanbul"}, "destination": {"code": "GYD", "city": "Baku"}, "departure_local": "2026-11-10T09:00", "arrival_local": "2026-11-10T15:35", "duration_min": 215, "stops": 0, "via": null, "price_azn": 260.0, "cabin": "economy", "baggage_kg": 20, "seats_available": 18}, {"id": "F006", "airline": "SkyBridge", "flight_number": "SB410", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "DXB", "city": "Dubai"}, "departure_local": "2026-11-05T02:40", "arrival_local": "2026-11-05T06:25", "duration_min": 225, "stops": 0, "via": null, "price_azn": 520.0, "cabin": "economy", "baggage_kg": 25, "seats_available": 25}, {"id": "F007", "airline": "SkyBridge", "flight_number": "SB412", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "DXB", "city": "Dubai"}, "departure_local": "2026-11-08T21:15", "arrival_local": "2026-11-09T01:00", "duration_min": 225, "stops": 0, "via": null, "price_azn": 465.0, "cabin": "economy", "baggage_kg": 25, "seats_available": 40}, {"id": "F008", "airline": "SkyBridge", "flight_number": "SB411", "origin": {"code": "DXB", "city": "Dubai"}, "destination": {"code": "GYD", "city": "Baku"}, "departure_local": "2026-11-12T08:00", "arrival_local": "2026-11-12T11:45", "duration_min": 225, "stops": 0, "via": null, "price_azn": 490.0, "cabin": "economy", "baggage_kg": 25, "seats_available": 31}, {"id": "F009", "airline": "Azerwings", "flight_number": "AW300", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "SVO", "city": "Moscow"}, "departure_local": "2026-11-04T10:00", "arrival_local": "2026-11-04T13:05", "duration_min": 245, "stops": 0, "via": null, "price_azn": 410.0, "cabin": "economy", "baggage_kg": 23, "seats_available": 17}, {"id": "F010", "airline": "Azerwings", "flight_number": "AW301", "origin": {"code": "SVO", "city": "Moscow"}, "destination": {"code": "GYD", "city": "Baku"}, "departure_local": "2026-11-11T16:45", "arrival_local": "2026-11-11T21:50", "duration_min": 245, "stops": 0, "via": null, "price_azn": 395.0, "cabin": "economy", "baggage_kg": 23, "seats_available": 20}, {"id": "F011", "airline": "Azerwings", "flight_number": "AW150", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "TBS", "city": "Tbilisi"}, "departure_local": "2026-11-03T12:00", "arrival_local": "2026-11-03T13:15", "duration_min": 75, "stops": 0, "via": null, "price_azn": 95.0, "cabin": "economy", "baggage_kg": 20, "seats_available": 30}, {"id": "F012", "airline": "Azerwings", "flight_number": "AW151", "origin": {"code": "TBS", "city": "Tbilisi"}, "destination": {"code": "GYD", "city": "Baku"}, "departure_local": "2026-11-09T17:30", "arrival_local": "2026-11-09T18:45", "duration_min": 75, "stops": 0, "via": null, "price_azn": 99.0, "cabin": "economy", "baggage_kg": 20, "seats_available": 26}, {"id": "F013", "airline": "Azerwings", "flight_number": "AW520", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "IST", "city": "Istanbul"}, "departure_local": "2026-11-06T05:00", "arrival_local": "2026-11-06T10:40", "duration_min": 400, "stops": 1, "via": "TBS", "price_azn": 175.0, "cabin": "economy", "baggage_kg": 15, "seats_available": 11}, {"id": "F014", "airline": "Bosphor Air", "flight_number": "BA730", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "DXB", "city": "Dubai"}, "departure_local": "2026-11-06T03:30", "arrival_local": "2026-11-06T12:30", "duration_min": 540, "stops": 1, "via": "IST", "price_azn": 390.0, "cabin": "economy", "baggage_kg": 20, "seats_available": 8}, {"id": "F015", "airline": "Azerwings", "flight_number": "AW302", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "SVO", "city": "Moscow"}, "departure_local": "2026-11-07T22:30", "arrival_local": "2026-11-08T01:35", "duration_min": 245, "stops": 0, "via": null, "price_azn": 380.0, "cabin": "economy", "baggage_kg": 23, "seats_available": 13}, {"id": "F016", "airline": "SkyBridge", "flight_number": "SB610", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "TAS", "city": "Tashkent"}, "departure_local": "2026-11-09T08:30", "arrival_local": "2026-11-09T12:50", "duration_min": 200, "stops": 0, "via": null, "price_azn": 340.0, "cabin": "economy", "baggage_kg": 23, "seats_available": 16}, {"id": "F017", "airline": "Caspian Air", "flight_number": "CA107", "origin": {"code": "GYD", "city": "Baku"}, "destination": {"code": "IST", "city": "Istanbul"}, "departure_local": "2026-11-07T18:00", "arrival_local": "2026-11-07T20:35", "duration_min": 215, "stops": 0, "via": null, "price_azn": 890.0, "cabin": "business", "baggage_kg": 40, "seats_available": 4}], "products": [{"id": "P001", "name": {"en": "Wireless Headphones", "az": "Simsiz qulaqlıq", "ru": "Беспроводные наушники"}, "category": "audio", "brand": "Sonivo", "price_azn": 89.9, "rating": 4.4, "stock": 23, "color": "black", "description": "Over-ear Bluetooth headphones, 30h battery"}, {"id": "P002", "name": {"en": "Wireless Earbuds", "az": "Simsiz qulaqcıq", "ru": "Беспроводные вкладыши"}, "category": "audio", "brand": "Sonivo", "price_azn": 59.0, "rating": 4.1, "stock": 0, "color": "white", "description": "In-ear earbuds with charging case"}, {"id": "P003", "name": {"en": "Laptop 15\" Pro", "az": "Noutbuk 15\" Pro", "ru": "Ноутбук 15\" Pro"}, "category": "computers", "brand": "Nexar", "price_azn": 1899.0, "rating": 4.6, "stock": 7, "color": "silver", "description": "16 GB RAM, 512 GB SSD, 15.6 inch display"}, {"id": "P004", "name": {"en": "Laptop 14\" Air", "az": "Noutbuk 14\" Air", "ru": "Ноутбук 14\" Air"}, "category": "computers", "brand": "Nexar", "price_azn": 1249.0, "rating": 4.3, "stock": 12, "color": "grey", "description": "8 GB RAM, 256 GB SSD, lightweight 1.2 kg"}, {"id": "P005", "name": {"en": "Smartphone X5", "az": "Smartfon X5", "ru": "Смартфон X5"}, "category": "phones", "brand": "Veltra", "price_azn": 999.0, "rating": 4.5, "stock": 18, "color": "black", "description": "6.5 inch OLED, 128 GB, dual camera"}, {"id": "P006", "name": {"en": "Smartphone X5 Lite", "az": "Smartfon X5 Lite", "ru": "Смартфон X5 Lite"}, "category": "phones", "brand": "Veltra", "price_azn": 549.0, "rating": 4.0, "stock": 31, "color": "blue", "description": "6.1 inch LCD, 64 GB"}, {"id": "P007", "name": {"en": "Smartwatch S2", "az": "Ağıllı saat S2", "ru": "Умные часы S2"}, "category": "wearables", "brand": "Veltra", "price_azn": 199.0, "rating": 4.2, "stock": 15, "color": "black", "description": "Heart rate, GPS, 7-day battery"}, {"id": "P008", "name": {"en": "Portable Speaker", "az": "Portativ dinamik", "ru": "Портативная колонка"}, "category": "audio", "brand": "Sonivo", "price_azn": 74.5, "rating": 4.3, "stock": 40, "color": "black", "description": "Waterproof, 12h playtime"}, {"id": "P009", "name": {"en": "Running Shoes", "az": "Qaçış ayaqqabısı", "ru": "Беговые кроссовки"}, "category": "sport", "brand": "Stridex", "price_azn": 129.0, "rating": 4.4, "stock": 26, "color": "black", "description": "Lightweight road running shoes, sizes 38-46"}, {"id": "P010", "name": {"en": "Backpack 25L", "az": "Çanta 25L", "ru": "Рюкзак 25 л"}, "category": "accessories", "brand": "Stridex", "price_azn": 65.0, "rating": 4.5, "stock": 19, "color": "black", "description": "Water-resistant, laptop compartment up to 15 inch"}, {"id": "P011", "name": {"en": "Coffee Machine", "az": "Qəhvə maşını", "ru": "Кофемашина"}, "category": "home", "brand": "Brewa", "price_azn": 349.0, "rating": 4.2, "stock": 5, "color": "silver", "description": "Automatic espresso, built-in grinder"}, {"id": "P012", "name": {"en": "Board Game Set", "az": "Stolüstü oyun dəsti", "ru": "Настольная игра"}, "category": "gifts", "brand": "Playo", "price_azn": 39.0, "rating": 4.7, "stock": 34, "color": "multicolor", "description": "Family strategy game for 2-5 players"}], "movies": [{"id": "M001", "title": "Orbit Zero", "genre": ["sci-fi", "thriller"], "language": "English", "duration_min": 128, "age_rating": "12+", "rating": 8.1, "synopsis": "A crew on a failing space station must decide who returns to Earth."}, {"id": "M002", "title": "The Last Caravan", "genre": ["adventure", "drama"], "language": "Azerbaijani", "duration_min": 115, "age_rating": "12+", "rating": 7.6, "synopsis": "A merchant family crosses the Silk Road during one eventful winter."}, {"id": "M003", "title": "Laugh Track", "genre": ["comedy"], "language": "Russian", "duration_min": 97, "age_rating": "6+", "rating": 6.9, "synopsis": "Two rival stand-up comedians are forced to share a tour bus."}, {"id": "M004", "title": "Midnight Archive", "genre": ["horror", "mystery"], "language": "English", "duration_min": 104, "age_rating": "18+", "rating": 7.2, "synopsis": "A night guard discovers that the city archive records events before they happen."}, {"id": "M005", "title": "Paper Kites", "genre": ["animation", "family"], "language": "Russian", "duration_min": 89, "age_rating": "0+", "rating": 7.8, "synopsis": "Children build kites that carry messages across a divided town."}, {"id": "M006", "title": "Iron Ledger", "genre": ["action", "crime"], "language": "English", "duration_min": 122, "age_rating": "16+", "rating": 7.0, "synopsis": "An accountant uncovers a smuggling network and must run."}, {"id": "M007", "title": "Spring in Baku", "genre": ["romance", "comedy"], "language": "Azerbaijani", "duration_min": 108, "age_rating": "12+", "rating": 7.4, "synopsis": "Two architects restoring an old building slowly fall for each other."}, {"id": "M008", "title": "Deep Signal", "genre": ["sci-fi", "mystery"], "language": "English", "duration_min": 136, "age_rating": "12+", "rating": 8.4, "synopsis": "A radio astronomer decodes a message that is addressed to her by name."}], "cinemas": [{"id": "C001", "name": "CinemaPlus Ganjlik", "district": "Nasimi", "address": "Ganjlik Mall, 3rd floor, Baku"}, {"id": "C002", "name": "CinemaPlus 28 Mall", "district": "Nasimi", "address": "28 Mall, 4th floor, Baku"}, {"id": "C003", "name": "CinemaPlus Sumgayit", "district": "Sumgayit", "address": "Sumgayit Boulevard Plaza, Sumgayit"}], "showtimes": [{"id": "S001", "movie_id": "M001", "cinema_id": "C001", "date": "2026-11-02", "time": "19:30", "hall": "Hall 1", "price_azn": 12.0, "seats_total": 120, "seats_available": 34}, {"id": "S002", "movie_id": "M003", "cinema_id": "C001", "date": "2026-11-02", "time": "21:00", "hall": "Hall 2", "price_azn": 9.0, "seats_total": 80, "seats_available": 52}, {"id": "S003", "movie_id": "M008", "cinema_id": "C002", "date": "2026-11-02", "time": "20:15", "hall": "Hall 3", "price_azn": 13.0, "seats_total": 150, "seats_available": 0}, {"id": "S004", "movie_id": "M005", "cinema_id": "C002", "date": "2026-11-03", "time": "16:00", "hall": "Hall 1", "price_azn": 7.0, "seats_total": 100, "seats_available": 71}, {"id": "S005", "movie_id": "M006", "cinema_id": "C003", "date": "2026-11-03", "time": "21:30", "hall": "Hall 1", "price_azn": 8.0, "seats_total": 90, "seats_available": 60}, {"id": "S006", "movie_id": "M002", "cinema_id": "C001", "date": "2026-11-04", "time": "18:45", "hall": "Hall 2", "price_azn": 9.0, "seats_total": 80, "seats_available": 45}, {"id": "S007", "movie_id": "M004", "cinema_id": "C002", "date": "2026-11-04", "time": "22:00", "hall": "Hall 3", "price_azn": 11.0, "seats_total": 150, "seats_available": 98}, {"id": "S008", "movie_id": "M001", "cinema_id": "C002", "date": "2026-11-05", "time": "19:00", "hall": "Hall 3", "price_azn": 13.0, "seats_total": 150, "seats_available": 110}, {"id": "S009", "movie_id": "M007", "cinema_id": "C003", "date": "2026-11-05", "time": "20:00", "hall": "Hall 1", "price_azn": 7.5, "seats_total": 90, "seats_available": 38}, {"id": "S010", "movie_id": "M008", "cinema_id": "C001", "date": "2026-11-06", "time": "20:30", "hall": "Hall 1", "price_azn": 13.0, "seats_total": 120, "seats_available": 12}, {"id": "S011", "movie_id": "M008", "cinema_id": "C001", "date": "2026-11-07", "time": "15:00", "hall": "Hall 1", "price_azn": 11.0, "seats_total": 120, "seats_available": 67}, {"id": "S012", "movie_id": "M001", "cinema_id": "C001", "date": "2026-11-07", "time": "19:30", "hall": "Hall 1", "price_azn": 14.0, "seats_total": 120, "seats_available": 5}, {"id": "S013", "movie_id": "M005", "cinema_id": "C003", "date": "2026-11-07", "time": "12:00", "hall": "Hall 2", "price_azn": 6.0, "seats_total": 70, "seats_available": 44}, {"id": "S014", "movie_id": "M006", "cinema_id": "C002", "date": "2026-11-07", "time": "21:45", "hall": "Hall 2", "price_azn": 12.0, "seats_total": 100, "seats_available": 57}, {"id": "S015", "movie_id": "M003", "cinema_id": "C002", "date": "2026-11-08", "time": "17:30", "hall": "Hall 1", "price_azn": 8.0, "seats_total": 100, "seats_available": 83}, {"id": "S016", "movie_id": "M007", "cinema_id": "C001", "date": "2026-11-08", "time": "19:00", "hall": "Hall 2", "price_azn": 9.5, "seats_total": 80, "seats_available": 29}]}};</script>
+<script>// SuperChat engine — JavaScript port of the Python package (superchat/), so the chat runs in the browser.
+// Cue lists, reply texts and data come from tables.json (exported from the Python code by export_tables.py).
+(function (root) {
+"use strict";
+
+function createSuperChat(T) {
+  const D = T.data;
+  // ------------------------------------------------------------------ regex helpers
+  const L = "[a-zа-я0-9_]";
+  const BOUND = `(?:(?<!${L})(?=${L})|(?<=${L})(?!${L}))`;
+  const cache = new Map();
+  function U(p) {
+    return p.replace(/\[\\w-\]/g, "[a-zа-я0-9_-]").replace(/\\b/g, BOUND).replace(/\\w/g, L);
+  }
+  function rx(p, flags = "") {
+    const k = p + "\u0000" + flags;
+    if (!cache.has(k)) cache.set(k, new RegExp(U(p), flags));
+    return cache.get(k);
+  }
+  const has = (t, ...pats) => pats.some(p => rx("(?<![a-zа-я0-9])" + p).test(t));
+  const hits = (t, pats) => pats.filter(p => has(t, p));
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  // ------------------------------------------------------------------ nlp
+  const REF = "2026-11-02";
+  const FOLD = { "ə": "e", "ı": "i", "ö": "o", "ü": "u", "ç": "c", "ş": "s", "ğ": "g", "ё": "е" };
+  function norm(text) {
+    let t = text.replace(/İ/g, "i").replace(/I/g, "i").toLowerCase().replace(/̇/g, "");
+    t = t.replace(/[əıöüçşğё]/g, c => FOLD[c]);
+    t = t.replace(/[“”«»"']/g, " ");
+    return t.replace(/\s+/g, " ").trim();
+  }
+  const tokens = t => t.match(/[a-zа-я0-9]+/g) || [];
+  const isQuestion = t => t.includes("?") || has(t, "is it", "are they", "does it", "mi\\b", "mu\\b", "midir",
+    "\\w+(?:dir|dur|dirmi)\\b", "ли\\b");
+
+  const AZW = new Set(T.nlp.AZ_WORDS), ENW = new Set(T.nlp.EN_WORDS);
+  function detectLanguage(text) {
+    const lo = text.toLowerCase();
+    const cyr = (lo.match(/[а-яё]/g) || []).length, lat = (lo.match(/[a-zəğışçöü]/g) || []).length;
+    if (cyr > lat) return "ru";
+    if (/[əğışçöü]/.test(lo)) return "az";
+    const tk = tokens(norm(text));
+    const az = tk.filter(x => AZW.has(x)).length, en = tk.filter(x => ENW.has(x)).length;
+    if (az === 0 && en === 0) return null;
+    return az > en ? "az" : "en";
+  }
+
+  const NUMW = T.nlp.NUM_WORDS, NUMALT = Object.keys(NUMW).join("|");
+  const MONTH_ALT = Object.values(T.nlp.MONTHS).join("|");
+  function countIn(t) {
+    let m = rx("(?<![a-zа-я0-9])(\\d{1,2}|" + NUMALT + ")\\s+" + T.nlp.COUNT_NOUNS + "(?![a-zа-я])").exec(t);
+    if (m) return /^\d+$/.test(m[1]) ? +m[1] : NUMW[m[1]];
+    m = rx("(?:for|на)\\s+(\\d|" + NUMALT + ")(?![a-zа-я0-9])(?!\\s*(?:azn|manat|man|ман|[a-zа-я]*\\s*(?:" + MONTH_ALT + ")))").exec(t);
+    if (m) return /^\d+$/.test(m[1]) ? +m[1] : NUMW[m[1]];
+    return null;
+  }
+  function ordinalIn(t) {
+    for (const [p, i] of T.nlp.ORDINALS) if (has(t, p + "(?![a-zа-я])")) return i;
+    const m = /(?:#|№|number|option|nomre|номер|вариант)\s*(\d{1,2})(?!\d)/.exec(t) ||
+      /(?<![\d.:])(\d{1,2})\s*-?\s*(?:ci|cu|ji|-?й|-?ой|-?ая)(?![a-zа-я])/.exec(t);
+    return m ? +m[1] - 1 : null;
+  }
+  function moneyRange(t) {
+    const num = "(\\d+(?:[.,]\\d+)?)", f = s => parseFloat(s.replace(",", "."));
+    let m = rx("(?:between|arasi|от)\\s*" + num + "\\s*(?:azn|manat|man)?\\s*(?:and|-|ve|до|ile)\\s*" + num).exec(t);
+    if (m) return [f(m[1]), f(m[2])];
+    m = rx(num + "\\s*-\\s*" + num + "\\s*(?:azn|manat|ман)").exec(t);
+    if (m) return [f(m[1]), f(m[2])];
+    let lo = null, hi = null;
+    m = rx("(?:under|below|less than|cheaper than|up to|max(?:imum)?|до|дешевле|меньше|не дороже)\\s*" + num).exec(t) ||
+        rx(num + "\\s*(?:azn|manat|man)?\\s*(?:-?(?:dan|den|ден|дан))?\\s*(?:ucuz|asagi|az|qeder)").exec(t);
+    if (m) hi = f(m[1]);
+    m = rx("(?:over|above|more than|from|от|дороже|больше)\\s*" + num + "\\s*(?:azn|manat|ман)").exec(t) ||
+        rx(num + "\\s*(?:azn|manat|man)?\\s*-?(?:dan|den)\\s*(?:baha|yuxari|cox)").exec(t);
+    if (m) lo = f(m[1]);
+    return [lo, hi];
+  }
+  const pad = n => String(n).padStart(2, "0");
+  function mkDate(day, month) {
+    const d = new Date(Date.UTC(2026, month - 1, day));
+    return d.getUTCMonth() === month - 1 ? `2026-${pad(month)}-${pad(day)}` : null;
+  }
+  function addDays(iso, n) { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  const weekday = iso => (new Date(iso + "T00:00:00Z").getUTCDay() + 6) % 7; // Mon=0
+  function findDates(t) {
+    const found = [], taken = new Array(t.length).fill(false);
+    const add = (m, iso) => {
+      if (!iso) return;
+      for (let i = m.index; i < m.index + m[0].length; i++) if (taken[i]) return;
+      found.push([m.index, iso]);
+      for (let i = m.index; i < m.index + m[0].length; i++) taken[i] = true;
+    };
+    const all = (p, fn) => { for (const m of t.matchAll(rx(p, "g"))) fn(m); };
+    all("(20\\d\\d)-(\\d\\d)-(\\d\\d)", m => add(m, `${m[1]}-${m[2]}-${m[3]}`));
+    for (const [mon, pat] of Object.entries(T.nlp.MONTHS)) {
+      all("(\\d{1,2})\\s*(?:st|nd|rd|th|-?(?:ci|cu|si|su))?\\s*(?:of\\s+)?" + pat + "(?![a-z])", m => add(m, mkDate(+m[1], +mon)));
+      all(pat + "\\s+(\\d{1,2})(?!\\d)(?:st|nd|rd|th)?", m => add(m, mkDate(+m[1], +mon)));
+    }
+    all("(?<![\\d:])(\\d{1,2})[./](\\d{1,2})(?![\\d:])", m => add(m, mkDate(+m[1], +m[2])));
+    for (const [pat, wd] of T.nlp.WEEKDAYS)
+      all("(?<![a-zа-я])" + pat + "(?![a-zа-я])", m => add(m, addDays(REF, ((wd - weekday(REF)) % 7 + 7) % 7)));
+    all("(?<![a-zа-я])" + T.nlp.TODAY, m => add(m, REF));
+    all("(?<![a-zа-я])" + T.nlp.TOMORROW + "(?![a-zа-я])", m => add(m, addDays(REF, 1)));
+    return found.sort((a, b) => a[0] - b[0]).map(x => x[1]);
+  }
+  const WD = { en: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], az: ["B.e.", "Ç.a.", "Ç.", "C.a.", "C.", "Ş.", "B."],
+               ru: ["пн", "вт", "ср", "чт", "пт", "сб", "вс"] };
+  const MO = { en: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+               az: ["yan", "fev", "mar", "apr", "may", "iyn", "iyl", "avq", "sen", "okt", "noy", "dek"],
+               ru: ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"] };
+  function prettyDate(iso, lang) {
+    iso = iso.slice(0, 10);
+    return `${WD[lang][weekday(iso)]} ${+iso.slice(8, 10)} ${MO[lang][+iso.slice(5, 7) - 1]}`;
+  }
+  const f1 = x => (Number.isInteger(x) ? x.toFixed(1) : String(x));   // Python prints 4.0, not 4
+  const money = v => (Math.round(v * 100) / 100).toFixed(2).replace(/0+$/, "").replace(/\.$/, "") + " AZN";
+  function hm(min, lang) {
+    const u = { en: ["h", "m"], az: ["s", "dəq"], ru: ["ч", "мин"] }[lang];
+    return `${Math.floor(min / 60)}${u[0]} ${pad(min % 60)}${u[1]}`;
+  }
+  const pick = (arr, i) => (i === null || i === undefined || !arr.length) ? null : (i < 0 ? arr[arr.length + i] : arr[i]) || null;
+  function fmt(table, key, lang, kw) {
+    const e = table[key]; let s = e[lang] || e.en;
+    if (kw) s = s.replace(/\{(\w+)\}/g, (_, k) => (kw[k] !== undefined ? kw[k] : `{${k}}`));
+    return s;
+  }
+
+  // ------------------------------------------------------------------ repositories (mock data, in memory)
+  const flightsDB = JSON.parse(JSON.stringify(D.flights)), productsDB = D.products, moviesDB = D.movies,
+        cinemasDB = D.cinemas, showsDB = JSON.parse(JSON.stringify(D.showtimes));
+  let refF = 0, refT = 0;
+  const repo = {
+    flightSearch(o, d, date) {
+      return flightsDB.filter(f => (!o || f.origin.code === o) && (!d || f.destination.code === d) &&
+        (!date || f.departure_local.startsWith(date))).map(f => ({ ...f }));
+    },
+    flight: id => flightsDB.find(f => f.id === id) || null,
+    reserveFlight(id, n) {
+      const f = flightsDB.find(x => x.id === id);
+      if (f.seats_available < n) return { ok: false, seats_available: f.seats_available };
+      f.seats_available -= n;
+      return { ok: true, reference: `F-${1000 + (++refF)}`, total_azn: f.price_azn * n };
+    },
+    product: id => productsDB.find(p => p.id === id) || null,
+    movie: id => moviesDB.find(m => m.id === id) || null,
+    showtimes(mid, date, cid) {
+      return showsDB.filter(s => (!mid || s.movie_id === mid) && (!date || s.date === date) && (!cid || s.cinema_id === cid))
+        .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    },
+    show: id => showsDB.find(s => s.id === id) || null,
+    reserveShow(id, n) {
+      const s = showsDB.find(x => x.id === id);
+      if (s.seats_available < n) return { ok: false, seats_available: s.seats_available };
+      s.seats_available -= n;
+      return { ok: true, reference: `T-${1000 + (++refT)}`, total_azn: s.price_azn * n };
+    },
+  };
+
+  // ------------------------------------------------------------------ entity index
+  const cityNames = {};
+  for (const f of flightsDB) { cityNames[f.origin.code] = f.origin.city; cityNames[f.destination.code] = f.destination.city; }
+  for (const f of flightsDB) if (f.via && !cityNames[f.via]) cityNames[f.via] = f.via;
+  const cityPatterns = {};
+  for (const [code, city] of Object.entries(cityNames))
+    cityPatterns[code] = [...(T.entities.CITY_ALIASES[code] || []), esc(norm(city)) + "\\w*"];
+  const BASE = new Set(T.entities.BASE_FORMS), TSTOP = new Set(T.entities.TITLE_STOP);
+  const airlines = [...new Set(flightsDB.map(f => f.airline))].sort();
+  const flightNumbers = {};
+  for (const f of flightsDB) (flightNumbers[f.flight_number.toLowerCase()] ||= []).push(f.id);
+  const brands = [...new Set(productsDB.map(p => p.brand))].sort();
+  const moviePatterns = {};
+  for (const m of moviesDB) {
+    const title = norm(m.title), pats = [esc(title)];
+    if (title.startsWith("the ")) pats.push(esc(title.slice(4)));
+    for (const tok of title.split(" ")) if (tok.length >= 5 && !TSTOP.has(tok)) pats.push(esc(tok) + "\\b");
+    moviePatterns[m.id] = pats;
+  }
+  const cinemaPatterns = {};
+  for (const c of cinemasDB) {
+    const short = norm(c.name.replace("CinemaPlus", "")).trim(), first = short.split(" ")[0];
+    cinemaPatterns[c.id] = [esc(norm(c.name)), esc(short), ...({
+      ganjlik: ["ganjlik\\w*", "gencli\\w*", "гянджлик\\w*"],
+      sumgayit: ["sumgayit\\w*", "sumqayit\\w*", "сумгаит\\w*", "сумгайыт\\w*"],
+      "28": ["28 mall", "28 молл", "28 мол\\w*"] }[first] || [])];
+  }
+  const E = {
+    findCities(t) {
+      const hitsArr = [];
+      for (const [code, pats] of Object.entries(cityPatterns)) {
+        for (const p of pats) {
+          const m = rx("(?<![a-zа-я0-9])" + p).exec(t);
+          if (!m) continue;
+          const word = /^[a-zа-я0-9]+/.exec(t.slice(m.index))[0], before = t.slice(0, m.index);
+          let role = null;
+          if (/(?:from|из|от|с)\s*$/.test(before)) role = "from";
+          else if (/(?:to|into|в|во|до|на|->|–|-)\s*$/.test(before)) role = "to";
+          else if (/(?:dan|den|nan|nen)$/.test(word) && word.length > 5) role = "from";
+          else if (!BASE.has(word) && /(?:ya|ye|a|e)$/.test(word) && !/[iu]$/.test(word) && word.length > 4 && /^[a-z]/.test(word)) role = "to";
+          hitsArr.push({ pos: m.index, code, role });
+          break;
+        }
+      }
+      hitsArr.sort((a, b) => a.pos - b.pos);
+      const seen = new Set();
+      return hitsArr.filter(h => !seen.has(h.code) && seen.add(h.code));
+    },
+    findAirline: t => airlines.find(a => has(t, esc(norm(a).split(" ")[0]))) || null,
+    findFlightNumber(t) {
+      for (const fn of Object.keys(flightNumbers))
+        if (new RegExp("(?<![a-z0-9])" + fn.slice(0, 2) + "\\s?-?" + fn.slice(2) + "(?!\\d)").test(t)) return fn;
+      return null;
+    },
+    findBrand: t => brands.find(b => has(t, esc(norm(b)) + "\\b")) || null,
+    findProductsByName: t => productsDB.filter(p => ["en", "az", "ru"].some(l => t.includes(norm(p.name[l])))).map(p => p.id),
+    findMovies(t) {
+      const h = [];
+      for (const [id, pats] of Object.entries(moviePatterns))
+        for (const p of pats) { const m = rx("(?<![a-zа-я0-9])" + p).exec(t); if (m) { h.push([m.index, id]); break; } }
+      return h.sort((a, b) => a[0] - b[0]).map(x => x[1]);
+    },
+    maskMovies(t) { for (const pats of Object.values(moviePatterns)) t = t.replace(rx(pats[0], "g"), " "); return t; },
+    findCinema(t) {
+      for (const [id, pats] of Object.entries(cinemaPatterns)) if (pats.some(p => p && has(t, p))) return id;
+      return null;
+    },
+  };
+
+  // ------------------------------------------------------------------ session
+  const DOMAINS = ["flights", "shopping", "cinema"];
+  function newSession() {
+    return { lang: "en", last_domain: null, preferences: {}, pending: null, history: [], domains: {
+      flights: { query: {}, filters: {}, results: [], return_results: [], selected: null, bookings: [] },
+      shopping: { query: {}, results: [], selected: null, cart: {}, history: [] },
+      cinema: { query: {}, movies: [], movie: null, showtimes: [], showtime: null, last_list: null, bookings: [], intent: null } } };
+  }
+  function hasState(s, d) {
+    const x = s.domains[d];
+    if (d === "flights") return !!(x.results.length || x.selected || Object.keys(x.query).length);
+    if (d === "shopping") return !!(x.results.length || x.selected || Object.keys(x.cart).length);
+    return !!(x.movies.length || x.movie || x.showtimes.length);
+  }
+
+  // ------------------------------------------------------------------ router
+  const LX = T.lex;
+  function score(t) {
+    const cues = [], strong = { flights: 0, shopping: 0, cinema: 0 }, weak = { flights: 0, shopping: 0, cinema: 0 };
+    const movies = E.findMovies(t), masked = E.maskMovies(t);
+    if (movies.length) { strong.cinema += 2; cues.push("movie:" + movies.join(",")); }
+    if (E.findCinema(t)) { strong.cinema += 2; cues.push("cinema-name"); }
+    for (const [d, pats] of [["flights", LX.FLIGHT_STRONG], ["shopping", LX.SHOP_STRONG], ["cinema", LX.CINEMA_STRONG]]) {
+      const h = hits(masked, pats); strong[d] += h.length; h.forEach(p => cues.push(`${d}:${p}`));
+    }
+    for (const [d, pats] of [["flights", LX.FLIGHT_WEAK], ["shopping", LX.SHOP_WEAK], ["cinema", LX.CINEMA_WEAK]])
+      weak[d] += hits(masked, pats).length;
+    const cities = E.findCities(masked);
+    for (const c of cities) {
+      if (c.code === "GYD" && !c.role && cities.length === 1) weak.flights += 1; else strong.flights += 2;
+      cues.push("city:" + c.code);
+    }
+    if (E.findAirline(masked) || E.findFlightNumber(masked)) { strong.flights += 2; cues.push("airline/flight-no"); }
+    if (E.findBrand(t) || E.findProductsByName(t).length) { strong.shopping += 2; cues.push("brand/product"); }
+    return { strong, weak, cues };
+  }
+  function split(t, doms) {
+    const parts = t.split(/\s*(?:,|;|\band also\b|\band\b|\bplus\b|\balso\b|\bve\b|\bhem de\b|(?<![а-я])и(?![а-я])|(?<![а-я])а также(?![а-я])|(?<![а-я])также(?![а-я]))\s+/);
+    const out = {}; doms.forEach(d => out[d] = []);
+    let last = null; const shared = [];
+    for (const part of parts) {
+      if (!part) continue;
+      const s = score(part).strong;
+      const best = doms.reduce((a, b) => (s[b] > s[a] ? b : a), doms[0]);
+      if (s[best] === 0) { if (last) out[last].push(part); else shared.push(part); continue; }
+      out[best].push(part); last = best;
+    }
+    const res = {};
+    for (const d of doms) res[d] = out[d].length ? [...shared, ...out[d]].join(" ") : t;
+    return res;
+  }
+  function route(t, session) {
+    const { strong, weak, cues } = score(t);
+    const doms = DOMAINS.filter(d => strong[d] > 0);
+    const followup = hits(t, LX.FOLLOWUP).length > 0 || ordinalIn(t) !== null;
+    const booking = hits(t, LX.BOOKING).length > 0, vague = hits(t, LX.VAGUE).length > 0, oos = hits(t, LX.OUT_OF_SCOPE).length > 0;
+    const dates = findDates(t), nTok = tokens(t).length;
+    const dec = (category, domains, extra) => ({ category, domains, cues: extra ? [...cues, extra] : cues });
+    const lexical = cues.filter(c => DOMAINS.includes(c.split(":")[0])).length;
+    const entityTopic = cues.some(c => /^(movie:|brand\/product|cinema-name|airline)/.test(c));
+    if (oos && lexical === 0 && !entityTopic) return dec("out_of_scope", [], "oos-cue overrides place name");
+    if (doms.length >= 2) { const d = dec("mixed", doms); d.clauses = split(t, doms); return d; }
+    if (doms.length === 1) {
+      const dom = doms[0];
+      return followup && hasState(session, dom) ? dec("followup", [dom], "anaphora+state") : dec(dom, [dom]);
+    }
+    if (oos) return dec("out_of_scope", [], "oos-cue");
+    const weakDoms = DOMAINS.filter(d => weak[d] > 0);
+    if (weakDoms.length === 1) return dec(hasState(session, weakDoms[0]) ? "followup" : weakDoms[0], weakDoms, "weak-cue");
+    const contextual = followup || booking || dates.length > 0 || countIn(t) !== null ||
+      (vague && has(t, "how much", "price", "qiymet", "сколько", "цен"));
+    if (contextual) {
+      let cands = DOMAINS.filter(d => hasState(session, d));
+      if (booking) {
+        const fc = cands.filter(d => d === "flights" || d === "cinema");
+        cands = fc.length ? fc : (has(t, "buy", "al\\b", "куп") ? cands.filter(d => d === "shopping") : []);
+      }
+      if (cands.includes(session.last_domain)) return dec("followup", [session.last_domain], "context:last-domain");
+      if (cands.length === 1) return dec("followup", cands, "context:only-domain-with-state");
+      return dec("ambiguous", [], "needs-context");
+    }
+    if (vague) return dec("ambiguous", [], "vague");
+    if (hits(t, LX.GREETING).length && nTok <= 6) return dec("greeting", []);
+    if (session.pending && nTok <= 4) return dec("ambiguous", [], "unclear-answer");
+    return dec("out_of_scope", [], "no-cue");
+  }
+
+  // ------------------------------------------------------------------ flights module
+  const FL = T.flights, fs = (k, lang, kw) => fmt(FL.STR, k, lang, kw);
+  const city = c => cityNames[c] || c;
+  const fStops = (f, lang) => f.stops === 0 ? fs("direct", lang) : fs("stops", lang, { n: f.stops, via: city(f.via) });
+  const fSeats = (f, lang) => f.seats_available ? fs("seats", lang, { n: f.seats_available }) : fs("sold_out", lang);
+  const fLine = (i, f, lang) => `${i}. ${f.airline} ${f.flight_number} · ${f.departure_local.slice(11)}→${f.arrival_local.slice(11)} · ${hm(f.duration_min, lang)} · ${fStops(f, lang)} · ${money(f.price_azn)} · ${fSeats(f, lang)}`;
+  const fDetails = (f, lang) => fs("details", lang, { airline: f.airline, fn: f.flight_number, date: prettyDate(f.departure_local, lang),
+    dep: f.departure_local.slice(11), arr: f.arrival_local.slice(11), o: f.origin.code, d: f.destination.code, dur: hm(f.duration_min, lang),
+    stops: fStops(f, lang), bag: f.baggage_kg, cabin: f.cabin, seats: fSeats(f, lang), price: money(f.price_azn) });
+  const directAnswer = (f, lang) => f.stops === 0 ? fs("is_direct_yes", lang) : fs("is_direct_no", lang, { n: f.stops, via: city(f.via) });
+  function fParse(t) {
+    const q = {}, cities = E.findCities(E.maskMovies(t));
+    if (cities.length >= 2) {
+      let [a, b] = cities;
+      if (a.role === "to" || b.role === "from") [a, b] = [b, a];
+      q.origin = a.code; q.destination = b.code;
+    } else if (cities.length === 1) q[cities[0].role === "from" ? "origin" : "destination"] = cities[0].code;
+    const dates = findDates(t);
+    if (dates.length) { q.date = dates[0]; if (dates.length > 1 && has(t, ...FL.RETURN)) q.return_date = dates[1]; }
+    const f = {};
+    if (has(t, ...FL.DIRECT)) f.direct = true;
+    if (has(t, ...FL.CHEAP)) f.sort = "price"; else if (has(t, ...FL.FAST)) f.sort = "duration"; else if (has(t, ...FL.EARLY)) f.sort = "departure";
+    if (has(t, ...FL.MORNING)) f.tod = "morning"; else if (has(t, ...FL.AFTERNOON)) f.tod = "afternoon"; else if (has(t, ...FL.EVENING)) f.tod = "evening";
+    const al = E.findAirline(t); if (al) f.airline = al;
+    const hi = moneyRange(t)[1]; if (hi) f.max_price = hi;
+    return { q, f };
+  }
+  function fApply(list, f) {
+    let out = list;
+    if (f.direct) out = out.filter(x => x.stops === 0);
+    if (f.airline) out = out.filter(x => x.airline === f.airline);
+    if (f.max_price) out = out.filter(x => x.price_azn <= f.max_price);
+    if (f.tod) { const r = { morning: [0, 12], afternoon: [12, 17], evening: [17, 24] }[f.tod];
+      out = out.filter(x => { const h = +x.departure_local.slice(11, 13); return h >= r[0] && h < r[1]; }); }
+    const key = { price: x => x.price_azn, duration: x => x.duration_min }[f.sort];
+    return [...out].sort((a, b) => key ? key(a) - key(b) : a.departure_local.localeCompare(b.departure_local));
+  }
+  const NOT_PLACES = new Set(["the", "a", "an", "my", "book", "buy", "fly", "go", "travel", "get", "be", "see", "watch", "have", "find", "me",
+    "it", "this", "that", "there", "and", "on", "in", "for", "cart", "basket", "economy", "business", "return", "come", "back", "morning",
+    "evening", "night", "today", "tomorrow", "tonight"]);
+  function unknownPlace(t) {
+    const known = Object.values(cityPatterns).flat();
+    for (const m of t.matchAll(/(?<![a-zа-я])(?:to|from|в|из)\s+([a-zа-я]{3,})/g)) {
+      const w = m[1];
+      if (NOT_PLACES.has(w) || findDates(w).length || known.some(p => rx("^" + p).test(w))) continue;
+      if (/^[a-z]/.test(w) && /^(to|from)/.test(m[0])) return w;
+      if (/^[а-я]/.test(w) && !/^(?:котор|эт|т[оа]|субб|пятн|понед|воскр|сред|четв|вторн|январ|феврал|ноябр|декабр)/.test(w)) return w;
+    }
+    return null;
+  }
+  function flightsHandle(turn, session) {
+    const st = session.domains.flights, { t, lang } = turn;
+    const { q: qn, f: fn } = fParse(t);
+    const results = st.results.map(repo.flight).filter(Boolean);
+    let chosen = null;
+    const fno = E.findFlightNumber(t);
+    if (fno) {
+      const ids = st.results.filter(i => repo.flight(i).flight_number.toLowerCase() === fno);
+      chosen = repo.flight(ids[0] || flightNumbers[fno][0]);
+    } else if (results.length && !qn.destination && !qn.origin && !qn.date) {
+      chosen = pick(results, ordinalIn(t));
+      if (!chosen && has(t, ...FL.SELECT_WORDS) && !has(t, ...FL.FLIGHTISH)) {
+        const sf = { ...fn }; if (isQuestion(t)) delete sf.direct;
+        const ranked = fApply(results, sf);
+        if (ranked.length && Object.keys(sf).length) chosen = ranked[0];
+      }
+    }
+    const wants = has(t, ...FL.RESERVE), cnt = countIn(t);
+    if (cnt) session.preferences.passengers = cnt;
+    const n = cnt || session.preferences.passengers || 1;
+    if (wants) {
+      const target = chosen || (st.selected ? repo.flight(st.selected) : null) || (results.length === 1 ? results[0] : null);
+      if (!target) {
+        if (results.length) return [fs("which_flight", lang), ...results.map((f, i) => fLine(i + 1, f, lang))].join("\n");
+        if (!Object.keys(qn).length) return fs("need_route", lang);
+      } else {
+        st.selected = target.id;
+        const r = repo.reserveFlight(target.id, n);
+        if (!r.ok) return fs("not_enough", lang, { n: r.seats_available, fn: target.flight_number });
+        st.bookings.push(r);
+        return fs("booked", lang, { fn: target.flight_number, date: prettyDate(target.departure_local, lang), n, total: money(r.total_azn), ref: r.reference });
+      }
+    }
+    if (has(t, ...FL.COMPARE) && results.length) {
+      const idxs = [];
+      for (const m of t.matchAll(/(?:first|second|third|fourth|1st|2nd|3rd|birinci|ikinci|ucuncu|перв[а-я]*|втор[а-я]*|трет[а-я]*|\d)/g)) {
+        const k = /^\d+$/.test(m[0]) ? +m[0] - 1 : ordinalIn(m[0]);
+        if (k !== null && k >= 0 && k < results.length && !idxs.includes(k)) idxs.push(k);
+      }
+      const pool = idxs.length >= 2 ? idxs.map(k => results[k]) : results.slice(0, 5);
+      const c = pool.reduce((a, b) => b.price_azn < a.price_azn ? b : a), fa = pool.reduce((a, b) => b.duration_min < a.duration_min ? b : a);
+      return [fs("compare_head", lang), ...pool.map((f, i) => fLine(i + 1, f, lang)), fs("compare_best", lang, { c: c.flight_number, f: fa.flight_number })].join("\n");
+    }
+    if (chosen) {
+      st.selected = chosen.id;
+      const out = [];
+      if (has(t, ...FL.DIRECT) && isQuestion(t)) out.push(directAnswer(chosen, lang));
+      else if (fn.sort === "price" && ordinalIn(t) === null) out.push(fs("selected_cheapest", lang));
+      out.push(fDetails(chosen, lang));
+      return out.join("\n");
+    }
+    if (st.selected && !Object.keys(qn).length && (isQuestion(t) || has(t, "baggage", "baqaj", "багаж")) && !has(t, ...FL.FLIGHTISH)) {
+      const sel = repo.flight(st.selected), out = [];
+      if (has(t, ...FL.DIRECT)) out.push(directAnswer(sel, lang));
+      out.push(fDetails(sel, lang));
+      return out.join("\n");
+    }
+    if (unknownPlace(t)) return fs("unknown_city", lang, { cities: Object.values(cityNames).sort().join(", ") });
+    const q = (!qn.destination || qn.destination === st.query.destination || turn.category === "followup") ? { ...st.query } : {};
+    Object.assign(q, qn);
+    if (q.destination && !q.origin) q.origin = q.destination !== "GYD" ? "GYD" : null;
+    if (!q.destination) { if (q.origin && q.origin !== "GYD") q.destination = "GYD"; else return fs("need_route", lang); }
+    if (!cityNames[q.origin] || !cityNames[q.destination]) return fs("unknown_city", lang, { cities: Object.values(cityNames).sort().join(", ") });
+    const filters = turn.category === "followup" ? { ...st.filters } : {};
+    Object.assign(filters, fn);
+    st.query = q; st.filters = filters; st.selected = null;
+    const rname = `${city(q.origin)} → ${city(q.destination)}`;
+    const allRoute = repo.flightSearch(q.origin, q.destination);
+    if (!q.date) {
+      if (!allRoute.length) return fs("no_route", lang);
+      const found = fApply(allRoute, filters);
+      st.results = found.map(f => f.id);
+      return [fs("results_nodate", lang, { route: rname }),
+        ...found.slice(0, 8).map((f, i) => `${i + 1}. ${prettyDate(f.departure_local, lang)} · ` + fLine(i + 1, f, lang).slice(3)),
+        fs("pick_hint", lang)].join("\n");
+    }
+    const found = fApply(repo.flightSearch(q.origin, q.destination, q.date), filters);
+    st.results = found.map(f => f.id);
+    const lines = [];
+    if (!found.length) {
+      lines.push(fs("none", lang, { route: rname, date: prettyDate(q.date, lang), filters: Object.keys(filters).length ? fs("filtered", lang) : "" }));
+      if (allRoute.length) {
+        const pool = fApply(allRoute, filters).length ? fApply(allRoute, filters) : allRoute;
+        lines.push(fs("other_dates", lang, { dates: [...new Set(pool.map(f => f.departure_local.slice(0, 10)))].sort().map(d => prettyDate(d, lang)).join(", ") }));
+      } else lines[0] = fs("no_route", lang);
+    } else {
+      lines.push(fs("results", lang, { route: rname, date: prettyDate(q.date, lang) }), ...found.map((f, i) => fLine(i + 1, f, lang)));
+      if (found.length > 1) lines.push(fs("pick_hint", lang));
+    }
+    if (q.return_date) {
+      const back = fApply(repo.flightSearch(q.destination, q.origin, q.return_date), {});
+      st.return_results = back.map(f => f.id);
+      const rr = `${city(q.destination)} → ${city(q.origin)}`;
+      lines.push("");
+      if (back.length) lines.push(fs("return_head", lang, { route: rr, date: prettyDate(q.return_date, lang) }), ...back.map((f, i) => fLine(i + 1, f, lang)));
+      else lines.push(fs("none", lang, { route: rr, date: prettyDate(q.return_date, lang), filters: "" }));
+    }
+    return lines.join("\n");
+  }
+
+  // ------------------------------------------------------------------ shopping module
+  const SH = T.shopping, ss = (k, lang, kw) => fmt(SH.STR, k, lang, kw);
+  const TYPE_PRED = {
+    headphones: p => /headphones|earbuds/i.test(p.name.en), speaker: p => p.name.en.includes("Speaker"),
+    laptops: p => p.category === "computers", bags: p => p.name.en.includes("Backpack"), shoes: p => p.name.en.includes("Shoes"),
+    coffee: p => p.name.en.includes("Coffee"), games: p => p.category === "gifts", phones: p => p.category === "phones",
+    wearables: p => p.category === "wearables", accessories: p => p.category === "accessories", audio: p => p.category === "audio" };
+  const pname = (p, lang) => p.name[lang] || p.name.en;
+  const pstock = (p, lang) => p.stock > 0 ? ss("in_stock", lang, { n: p.stock }) : ss("out_stock", lang);
+  const pLine = (i, p, lang) => `${i}. ${pname(p, lang)} — ${p.brand}, ${p.color} · ${money(p.price_azn)} · ★${f1(p.rating)} · ${pstock(p, lang)}`;
+  const pDetails = (p, lang) => ss("details", lang, { name: pname(p, lang), brand: p.brand, price: money(p.price_azn), rating: f1(p.rating),
+    color: p.color, stock: pstock(p, lang), desc: p.description || "" });
+  const cartTotal = cart => Object.entries(cart).reduce((s, [id, n]) => s + repo.product(id).price_azn * n, 0);
+  function sParse(t) {
+    const q = {};
+    for (const [k, pats] of Object.entries(SH.TYPES)) if (has(t, ...pats)) { q.type = k; break; }
+    const b = E.findBrand(t); if (b) q.brand = b;
+    for (const [c, pats] of Object.entries(SH.COLORS)) if (has(t, ...pats)) { q.color = c; break; }
+    const [lo, hi] = moneyRange(t); if (lo) q.min = lo; if (hi) q.max = hi;
+    if (has(t, ...SH.CHEAP) && !hi) q.sort = "price"; else if (has(t, ...SH.BEST)) q.sort = "rating"; else if (has(t, ...SH.EXPENSIVE)) q.sort = "-price";
+    const ids = E.findProductsByName(t); if (ids.length) q.ids = ids;
+    return q;
+  }
+  function sSearch(q) {
+    let items = [...productsDB];
+    if (q.ids) items = items.filter(p => q.ids.includes(p.id));
+    if (q.type) items = items.filter(TYPE_PRED[q.type]);
+    if (q.brand) items = items.filter(p => p.brand === q.brand);
+    if (q.color) items = items.filter(p => p.color === q.color);
+    const base = [...items].sort((a, b) => a.price_azn - b.price_azn);
+    if (q.min) items = items.filter(p => p.price_azn >= q.min);
+    if (q.max) items = items.filter(p => p.price_azn <= q.max);
+    const cmp = { price: (a, b) => a.price_azn - b.price_azn, "-price": (a, b) => b.price_azn - a.price_azn, rating: (a, b) => b.rating - a.rating }[q.sort]
+      || ((a, b) => ((a.stock === 0) - (b.stock === 0)) || a.price_azn - b.price_azn);
+    return [items.sort(cmp), base];
+  }
+  const cond = (q, lang) => (q.max ? ss("under", lang, { v: money(q.max) }) : "") + (q.min ? ss("over", lang, { v: money(q.min) }) : "");
+  const sameQ = (a, b) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+  function shoppingHandle(turn, session) {
+    const st = session.domains.shopping, { t, lang } = turn, qn = sParse(t);
+    const results = st.results.map(repo.product).filter(Boolean);
+    const sel = st.selected ? repo.product(st.selected) : null;
+    const isSearch = !!(qn.min || qn.max || has(t, ...SH.SEARCH));
+    let target = null;
+    const idx = ordinalIn(t);
+    if (idx !== null && results.length) target = pick(results, idx);
+    else if (qn.ids && qn.ids.length === 1 && !isSearch) target = repo.product(qn.ids[0]);
+    else if (results.length && has(t, "(?:cheap|expensive)\\w* one", "ucuz olan\\w*", "daha ucuz\\w*", "en ucuz\\w*", "подешевле", "самый дешев\\w*")) {
+      const sorted = [...results].sort((a, b) => a.price_azn - b.price_azn);
+      target = has(t, "expensive") ? sorted[sorted.length - 1] : sorted[0];
+    } else if (results.length && qn.brand && !qn.type) {
+      const inList = results.filter(p => p.brand === qn.brand); target = inList.length === 1 ? inList[0] : null;
+    }
+    const pronoun = has(t, "\\bit\\b", "\\bthis\\b", "\\bthat\\b", "onu\\b", "bunu\\b", "его\\b", "е[её]\\b", "этот", "это");
+    if (has(t, ...SH.REMOVE) && (has(t, ...SH.CART) || Object.keys(st.cart).length)) {
+      let item = target || (pronoun ? sel : null);
+      if (!item && qn.type) item = Object.keys(st.cart).map(repo.product).find(TYPE_PRED[qn.type]) || null;
+      if (!item || !st.cart[item.id]) return ss("not_in_cart", lang);
+      delete st.cart[item.id];
+      return ss("removed", lang, { name: pname(item, lang), total: money(cartTotal(st.cart)) });
+    }
+    if (has(t, ...SH.ADD) && (has(t, ...SH.CART) || target || pronoun || sel)) {
+      const item = target || sel;
+      if (!item) return ss("which", lang);
+      st.selected = item.id;
+      const n = countIn(t) || 1;
+      if (item.stock <= 0) return ss("add_oos", lang, { name: pname(item, lang) });
+      if ((st.cart[item.id] || 0) + n > item.stock) return ss("add_limit", lang, { n: item.stock, name: pname(item, lang) });
+      st.cart[item.id] = (st.cart[item.id] || 0) + n;
+      return ss("added", lang, { n, name: pname(item, lang), total: money(cartTotal(st.cart)) });
+    }
+    if (has(t, ...SH.CART)) {
+      if (!Object.keys(st.cart).length) return ss("cart_empty", lang);
+      const lines = [ss("cart", lang)];
+      for (const [id, n] of Object.entries(st.cart)) { const p = repo.product(id); lines.push(`• ${n} × ${pname(p, lang)} — ${money(p.price_azn * n)}`); }
+      lines.push(ss("total", lang, { total: money(cartTotal(st.cart)) }));
+      return lines.join("\n");
+    }
+    if (has(t, ...SH.COMPARE)) {
+      let pool = [];
+      for (const m of t.matchAll(/(?:first|second|third|fourth|birinci|ikinci|ucuncu|перв[а-я]*|втор[а-я]*|трет[а-я]*)/g)) {
+        const k = ordinalIn(m[0]);
+        if (k !== null && k < results.length && !pool.includes(results[k])) pool.push(results[k]);
+      }
+      if (pool.length < 2 && qn.ids && qn.ids.length >= 2) pool = qn.ids.map(repo.product);
+      if (pool.length < 2) pool = !qn.type ? results.slice(0, 4) : sSearch(qn)[0].slice(0, 4);
+      if (pool.length < 2) return ss("which", lang);
+      const c = pool.reduce((a, b) => b.price_azn < a.price_azn ? b : a), r = pool.reduce((a, b) => b.rating > a.rating ? b : a);
+      return [ss("compare_head", lang), ...pool.map((p, i) => pLine(i + 1, p, lang)), ss("compare_best", lang, { c: pname(c, lang), r: pname(r, lang) })].join("\n");
+    }
+    if (target || (sel && (pronoun || has(t, ...SH.STOCK)) && !qn.type)) {
+      const item = target || sel; st.selected = item.id;
+      if (has(t, ...SH.STOCK))
+        return ss(item.stock > 0 ? "stock_yes" : "stock_no", lang, { name: pname(item, lang), n: item.stock }) + "\n" + pDetails(item, lang);
+      return pDetails(item, lang);
+    }
+    let sq = (!qn.ids || qn.type) ? Object.fromEntries(Object.entries(qn).filter(([k]) => k !== "ids")) : qn;
+    if (!Object.keys(sq).length) {
+      if (has(t, ...SH.SEARCH)) return ss("not_found", lang);
+      if (results.length) return [ss("again", lang, { cond: cond(st.query, lang) }), ...results.map((p, i) => pLine(i + 1, p, lang))].join("\n");
+      return ss("need_query", lang);
+    }
+    if (turn.category === "followup" && !sq.type && st.query.type) sq = { ...st.query, ...sq };
+    const current = { query: st.query, results: st.results, selected: st.selected };
+    for (const past of [current, ...[...st.history].reverse()]) {
+      if (past.query.type === sq.type && (has(t, ...SH.BACK) || sameQ(past.query, sq)) && (Object.keys(sq).length === 1 || sameQ(past.query, sq))) {
+        st.query = past.query; st.results = past.results; st.selected = past.selected;
+        const lines = [ss("again", lang, { cond: cond(past.query, lang) }), ...past.results.map(repo.product).map((p, i) => pLine(i + 1, p, lang))];
+        if (past.selected) lines.push(ss("selected_note", lang, { name: pname(repo.product(past.selected), lang) }));
+        return lines.join("\n");
+      }
+    }
+    const [found, base] = sSearch(sq);
+    if (Object.keys(st.query).length) {
+      st.history = st.history.filter(h => !sameQ(h.query, st.query)).slice(-5);
+      st.history.push({ query: st.query, results: st.results, selected: st.selected });
+    }
+    st.query = sq; st.results = found.map(p => p.id); st.selected = null;
+    if (!found.length) {
+      const out = [ss("none", lang, { cond: cond(sq, lang) })];
+      if (base.length) { out.push(ss("closest", lang), ...base.slice(0, 3).map((p, i) => pLine(i + 1, p, lang))); st.results = base.slice(0, 3).map(p => p.id); }
+      return out.join("\n");
+    }
+    const lines = [ss("results", lang, { cond: cond(sq, lang) }), ...found.map((p, i) => pLine(i + 1, p, lang))];
+    if (found.length > 1) lines.push(ss("pick_hint", lang)); else st.selected = found[0].id;
+    return lines.join("\n");
+  }
+
+  // ------------------------------------------------------------------ cinema module
+  const CI = T.cinema, cs = (k, lang, kw) => fmt(CI.STR, k, lang, kw);
+  const genres = m => Array.isArray(m.genre) ? m.genre : [m.genre];
+  const cinemaName = id => (cinemasDB.find(c => c.id === id) || {}).name || id;
+  const sSeats = (s, lang) => s.seats_available > 0 ? cs("seats", lang, { n: s.seats_available }) : cs("sold_out", lang);
+  const showLine = (i, s, lang, withTitle) => `${i}. ${withTitle ? repo.movie(s.movie_id).title + " · " : ""}${prettyDate(s.date, lang)} ${s.time} · ${cinemaName(s.cinema_id)}, ${s.hall} · ${money(s.price_azn)} · ${sSeats(s, lang)}`;
+  const movieLine = (i, m) => `${i}. ${m.title} — ${genres(m).join(", ")}, ${m.language}, ${m.age_rating}, ★${f1(m.rating)}`;
+  const mDetails = (m, lang) => cs("details", lang, { title: m.title, year_genre: genres(m).join(", "), language: m.language,
+    dur: m.duration_min, age: m.age_rating, rating: f1(m.rating), syn: m.synopsis || "" });
+  const dateLabel = (d, lang) => d === REF ? cs("tonight", lang) : prettyDate(d, lang);
+  function cParse(t) {
+    const q = {};
+    const g = Object.entries(CI.GENRES).filter(([, p]) => has(t, ...p)).map(([k]) => k);
+    if (g.length) q.genre = g[0];
+    for (const [ln, p] of Object.entries(CI.LANGS)) if (has(t, ...p)) q.language = ln;
+    let m = /(?:rating|rated|reytinq[a-z]*|рейтинг[а-я]*)\s*(?:above|over|>|at least|from|от|выше)?\s*(\d(?:[.,]\d)?)/.exec(t);
+    if (m) q.min_rating = parseFloat(m[1].replace(",", "."));
+    const dates = findDates(t); if (dates.length) q.date = dates[0];
+    const cid = E.findCinema(t); if (cid) q.cinema = cid;
+    m = /(\d{1,2})[:.](\d{2})/.exec(t); if (m) q.time = `${pad(+m[1])}:${m[2]}`;
+    return q;
+  }
+  function cinemaHandle(turn, session) {
+    const st = session.domains.cinema, { t, lang } = turn, q = cParse(t);
+    const listedMovies = st.movies.map(repo.movie), listedShows = st.showtimes.map(repo.show);
+    const wantsBook = has(t, ...CI.RESERVE) || st.intent === "book";
+    let n = countIn(t);
+    if (has(t, "cinemas", "kinoteatrlar\\w*", "кинотеатр(?:ы|ов)", "which cinema", "hansi kinoteatr", "какие кинотеатры") && !E.findMovies(t).length && !q.genre)
+      return [cs("cinemas", lang), ...cinemasDB.map(c => `• ${c.name} — ${c.address}`)].join("\n");
+    let movie = null;
+    const named = E.findMovies(t), idx = ordinalIn(t);
+    if (named.length) movie = repo.movie(named[0]);
+    else if (idx !== null && st.last_list === "showtimes" && listedShows.length) {
+      const show = pick(listedShows, idx);
+      if (show) { st.showtime = show.id; st.movie = show.movie_id; movie = repo.movie(show.movie_id); }
+    } else if (idx !== null && listedMovies.length) movie = pick(listedMovies, idx);
+    let gm = [];
+    if (!movie && q.genre && listedMovies.length && has(t, "one\\b", "olan\\w*", "тот", "который", "the ")) {
+      gm = listedMovies.filter(m => genres(m).includes(q.genre));
+      if (gm.length === 1) movie = gm[0];
+    }
+    if (movie && (!st.movie || st.movie !== movie.id)) {
+      st.movie = movie.id;
+      st.showtime = (idx !== null && st.last_list === "showtimes") ? st.showtime : null;
+    }
+    if (!movie && st.movie && !gm.length && !q.genre && !q.language &&
+        (wantsBook || has(t, ...CI.SEATS, ...CI.PRICE, ...CI.SHOWTIMES) || turn.category === "followup")) movie = repo.movie(st.movie);
+    if (gm.length > 1) {
+      const shows = gm.flatMap(m => repo.showtimes(m.id, q.date)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      st.showtimes = shows.map(s => s.id); st.last_list = "showtimes"; st.movie = null;
+      const lines = [cs("several_genre", lang, { genre: q.genre, titles: gm.map(m => m.title).join(", ") })];
+      if (shows.length) lines.push(...shows.map((s, i) => showLine(i + 1, s, lang, true)));
+      else lines.push(cs("nothing_date", lang, { cond: "", date: dateLabel(q.date || REF, lang) }));
+      if (wantsBook || n) lines.push(cs("which_show", lang));
+      return lines.join("\n");
+    }
+    if (wantsBook) {
+      if (n) session.preferences.tickets = n;
+      n = n || session.preferences.tickets || 1;
+      let show = st.showtime ? repo.show(st.showtime) : null;
+      if (show && movie && show.movie_id !== movie.id) show = null;
+      if (!show && idx !== null && st.last_list === "showtimes") show = pick(listedShows, idx);
+      if (!show) {
+        st.intent = "book";
+        if (!movie) {
+          const pool = listedMovies.length > 1 ? listedMovies : moviesDB.filter(m => repo.showtimes(m.id).length);
+          st.movies = pool.map(m => m.id); st.last_list = "movies";
+          return [cs("which_film", lang), ...pool.map((m, i) => movieLine(i + 1, m))].join("\n");
+        }
+        let cands = repo.showtimes(movie.id, q.date, q.cinema);
+        if (q.time) cands = cands.filter(s => s.time === q.time);
+        const bookable = cands.filter(s => s.seats_available >= n);
+        if (bookable.length === 1 && (q.date || q.time || cands.length === 1)) show = bookable[0];
+        else {
+          if (!cands.length) cands = repo.showtimes(movie.id);
+          st.showtimes = cands.map(s => s.id); st.last_list = "showtimes";
+          return [cs("showtimes_for", lang, { title: movie.title, date: "" }), ...cands.map((s, i) => showLine(i + 1, s, lang)), cs("which_show", lang)].join("\n");
+        }
+      }
+      const r = repo.reserveShow(show.id, n);
+      if (!r.ok) return cs("not_enough", lang, { n: r.seats_available });
+      st.showtime = show.id; st.intent = null; st.bookings.push(r);
+      return cs("booked", lang, { n, title: repo.movie(show.movie_id).title, date: prettyDate(show.date, lang), time: show.time,
+        cinema: cinemaName(show.cinema_id), hall: show.hall, total: money(r.total_azn), ref: r.reference });
+    }
+    if (idx !== null && st.last_list === "showtimes" && st.showtime && !named.length) {
+      const s = repo.show(st.showtime);
+      return cs("seat_answer", lang, { when: `${repo.movie(s.movie_id).title}, ${prettyDate(s.date, lang)} ${s.time}, ${cinemaName(s.cinema_id)}`,
+        seats: sSeats(s, lang), price: money(s.price_azn) });
+    }
+    if (movie) {
+      const shows = repo.showtimes(movie.id, q.date, q.cinema);
+      const dateTxt = !q.date ? "" : q.date === REF ? " " + cs("tonight", lang) : cs("on", lang, { d: prettyDate(q.date, lang) });
+      st.last_list = "showtimes"; st.query = { ...st.query, ...q };
+      if (!shows.length) {
+        const all = repo.showtimes(movie.id); st.showtimes = all.map(s => s.id);
+        const lines = [cs("no_showtimes", lang, { title: movie.title, date: dateTxt })];
+        if (all.length) lines.push(cs("other_days", lang, { dates: [...new Set(all.map(s => s.date))].sort().map(d => prettyDate(d, lang)).join(", ") }));
+        return lines.join("\n");
+      }
+      st.showtimes = shows.map(s => s.id);
+      const lines = [];
+      if (!has(t, ...CI.SEATS, ...CI.PRICE, ...CI.SHOWTIMES) && !q.date && turn.category !== "followup") lines.push(mDetails(movie, lang));
+      lines.push(cs("showtimes_for", lang, { title: movie.title, date: dateTxt }), ...shows.map((s, i) => showLine(i + 1, s, lang)));
+      return lines.join("\n");
+    }
+    let c = "";
+    if (q.genre) c += ` · ${q.genre}`; if (q.language) c += ` · ${q.language}`; if (q.min_rating) c += ` · ★≥${f1(q.min_rating)}`;
+    let movies = moviesDB.filter(m => (!q.genre || genres(m).includes(q.genre)) && (!q.language || m.language === q.language) && (!q.min_rating || m.rating >= q.min_rating));
+    if (has(t, ...CI.TOP)) movies = [...movies].sort((a, b) => b.rating - a.rating);
+    if (q.date || has(t, "playing", "showing", "on now", "ne gedir", "neler gedir", "ид[её]т", "в прокате")) {
+      const day = q.date || REF, ids = new Set(movies.map(m => m.id));
+      const shows = repo.showtimes(null, day, q.cinema).filter(s => ids.has(s.movie_id));
+      if (!shows.length) { st.movies = []; st.showtimes = []; return cs("nothing_date", lang, { cond: c, date: dateLabel(day, lang) }); }
+      const order = [...new Set(shows.map(s => s.movie_id))];
+      st.movies = order; st.showtimes = shows.map(s => s.id); st.last_list = "movies"; st.movie = null; st.query = { ...q, date: day };
+      const lines = [cs("playing", lang, { date: dateLabel(day, lang) })];
+      order.forEach((mid, i) => {
+        const m = repo.movie(mid);
+        const times = shows.filter(s => s.movie_id === mid).map(s => `${s.time} ${cinemaName(s.cinema_id).replace("CinemaPlus ", "")} (${sSeats(s, lang)})`).join(", ");
+        lines.push(`${i + 1}. ${m.title} — ${genres(m).join(", ")}, ${m.language}, ★${f1(m.rating)} · ${times}`);
+      });
+      lines.push(cs("film_line_hint", lang));
+      return lines.join("\n");
+    }
+    if (!movies.length) return cs("no_films", lang, { cond: c });
+    st.movies = movies.map(m => m.id); st.last_list = "movies"; st.movie = null; st.query = q;
+    return [cs("films", lang, { cond: c }), ...movies.map((m, i) => movieLine(i + 1, m)), cs("film_line_hint", lang)].join("\n");
+  }
+
+  // ------------------------------------------------------------------ orchestrator
+  const MODULES = { flights: flightsHandle, shopping: shoppingHandle, cinema: cinemaHandle };
+  const TX = T.app.TEXT, HEAD = T.app.HEAD;
+  const sessions = new Map();
+  function getSession(id) { if (!sessions.has(id)) sessions.set(id, newSession()); return sessions.get(id); }
+  function clarify(t, lang, session) {
+    if (hits(t, LX.BOOKING).length) { const n = countIn(t); return TX.ambiguous_book[lang].replace("{n}", n ? ` (${n})` : ""); }
+    const active = DOMAINS.filter(d => hasState(session, d));
+    if (active.length >= 2) {
+      const names = TX.dom[lang];
+      return TX.ambiguous_ctx[lang].replace("{a}", names[active[active.length - 2]]).replace("{b}", names[active[active.length - 1]]);
+    }
+    return TX.ambiguous[lang];
+  }
+  function handle(sessionId, message) {
+    const session = getSession(sessionId);
+    message = String(message || "").trim().slice(0, 1000);
+    const lang = detectLanguage(message) || session.lang;
+    session.lang = lang;
+    let t = norm(message);
+    if (session.pending) {
+      const first = route(t, session);
+      if (["flights", "shopping", "cinema", "followup"].includes(first.category) && t.split(" ").length <= 6) t = norm(session.pending.text) + " " + t;
+      session.pending = null;
+    }
+    const d = route(t, session), cat = d.category;
+    let reply;
+    try {
+      if (["flights", "shopping", "cinema", "followup"].includes(cat)) {
+        const dom = d.domains[0];
+        reply = MODULES[dom]({ raw: message, t, lang, category: cat }, session);
+        session.last_domain = dom;
+      } else if (cat === "mixed") {
+        reply = d.domains.map(dom => {
+          const r = HEAD[dom] + " " + MODULES[dom]({ raw: message, t: (d.clauses || {})[dom] || t, lang, category: dom }, session);
+          session.last_domain = dom; return r;
+        }).join("\n\n");
+      } else if (cat === "ambiguous") { session.pending = { text: message }; reply = clarify(t, lang, session); }
+      else if (cat === "greeting") reply = TX.greeting[lang];
+      else reply = TX.oos[lang];
+    } catch (e) {
+      if (typeof console !== "undefined") console.error(e);
+      reply = TX.error[lang];
+    }
+    if (reply) reply = reply[0].toUpperCase() + reply.slice(1);
+    const turn = { user: message, reply, category: cat, domains: d.domains, lang, cues: d.cues.slice(0, 8) };
+    session.history.push(turn);
+    return { ...turn, state: { lang: session.lang, last_domain: session.last_domain, preferences: session.preferences, domains: session.domains } };
+  }
+  return { handle, route: (t, sid) => route(norm(t), getSession(sid)), reset: id => sessions.delete(id), getSession, norm };
+}
+
+if (typeof module !== "undefined" && module.exports) module.exports = { createSuperChat };
+else root.createSuperChat = createSuperChat;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>
+(function () {
+  const bot = createSuperChat(window.SUPERCHAT_TABLES);
+  let sid = "s" + Date.now();
+  const log = document.getElementById("log"), q = document.getElementById("q");
+  const LABEL = { flights: "Flights", shopping: "Shopping", cinema: "Cinema", mixed: "Mixed", followup: "Follow-up",
+    ambiguous: "Clarifying", out_of_scope: "Out of scope", greeting: "Hello" };
+  function add(text, who, r) {
+    const d = document.createElement("div"); d.className = "msg " + who;
+    if (r) {
+      const t = document.createElement("span"), dom = r.domains.length === 1 ? r.domains[0] : "";
+      t.className = "tag " + dom;
+      t.textContent = r.category === "followup" ? "Follow-up · " + LABEL[dom] : (LABEL[r.category] || r.category);
+      d.appendChild(t); d.appendChild(document.createElement("br"));
+    }
+    d.appendChild(document.createTextNode(text)); log.appendChild(d); log.scrollTop = log.scrollHeight;
+  }
+  function send(text) {
+    add(text, "user");
+    const r = bot.handle(sid, text);
+    add(r.reply, "bot", r);
+    document.getElementById("route").textContent = JSON.stringify({ category: r.category, domains: r.domains, language: r.lang, cues: r.cues }, null, 1);
+    document.getElementById("state").textContent = JSON.stringify(r.state, null, 1);
+  }
+  function welcome() { add("Hi! I can find flights, products and films — all in this one chat. Write in English, Azərbaycanca or по-русски.", "bot"); }
+  document.getElementById("f").addEventListener("submit", e => { e.preventDefault(); const v = q.value.trim(); if (v) { q.value = ""; send(v); } q.focus(); });
+  document.getElementById("reset").addEventListener("click", () => { bot.reset(sid); sid = "s" + Date.now(); log.innerHTML = "";
+    document.getElementById("route").textContent = "Send a message to see how it was routed."; document.getElementById("state").textContent = "—"; welcome(); });
+  const examples = ["Find me a flight from Baku to Istanbul on Friday", "The cheaper one, is it direct?", "What is playing tonight?",
+    "Do you have wireless headphones under 100 AZN?", "Okay, and the sci-fi one, any seats on Saturday?",
+    "I need a flight to Istanbul on 6 November and a backpack for the trip", "Show me laptops", "The second one, is it in stock?",
+    "Add it to my cart", "Book two seats", "Show me something good", "What is the weather in Ganja?",
+    "Bu axşam hansı filmlər gedir?", "Найди рейс в Дубай"];
+  const chips = document.getElementById("chips");
+  examples.forEach(x => { const b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = x;
+    b.addEventListener("click", () => send(x)); chips.appendChild(b); });
+  welcome();
+})();
+</script>
+
+</body>
+</html>
