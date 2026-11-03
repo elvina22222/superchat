@@ -30,6 +30,16 @@ python tests/run_tests.py    # run all tests and regenerate TEST_LOG.md
 exported by `web/export_tables.py`. `node web/parity_test.js` checks that the JS port gives **the same output as Python**
 on all 208 test messages (208/208). Rebuild the page with `python web/build.py`.
 
+## Bonus tasks (in the web version: `index.html` + `web/`)
+
+| Bonus | How it works | Tested |
+|---|---|---|
+| **Multilingual** (whole SuperChat) | EN / AZ / RU in every domain, language switching mid-session, mixed-language input; routing accuracy is reported per language in TEST_LOG.md | ✅ |
+| **Voice input** (Shopping Assistant) | 🎤 turns on hands-free mode: the browser's Web Speech API detects the start and end of speech by itself (no push-to-talk), and each sentence goes through the same routing pipeline. Voice language: Auto (follows the chat) / EN / AZ / RU. Optional “Read replies aloud” uses speech synthesis; the mic pauses while the bot speaks, so it does not hear itself. Works in Chrome and Edge. | ✅ end-to-end with a simulated recogniser |
+| **Visual search** (Shopping Assistant) | 📷 classifies the photo **in the browser** with MobileNetV2 (ONNX model zoo, ImageNet-1k) on onnxruntime-web. Both are served from this repo (`web/vision/`), so no outside servers are involved. 31 ImageNet classes map to catalogue types. The reply always states the confidence: ≥40% shows matching products (ranked by the photo's main colour), 12–40% asks “is it X?”, and below that it asks what the product is. ImageNet has no “headphones” class, so stand-ins (stethoscope, iPod) are capped below 40%, and SuperChat always asks before showing headphones. | ✅ on real ImageNet photos: backpack 93%, running shoe, phone 94%, speaker 98%, espresso maker → products; busy laptop scene 24% → question; dog → “not in catalogue” |
+
+The live link runs these in the browser. Speech recognition in Chrome uses the browser vendor's online service; image recognition runs fully on the device.
+
 ## Try these
 
 | Message | What it shows |
@@ -73,6 +83,8 @@ superchat/api_repositories.py  Aviasales + REST repositories, source selection f
 tools/fake_api.py          local fake of the organisers' APIs (auth, paging, failures)
 docs/API_CONTRACT.md       expected endpoints and behaviour
 web/                       browser version for the live link (engine.js, build.py, parity test)
+web/vision/                visual search: MobileNetV2 ONNX model, onnxruntime-web, vision.js
+index.html                 the live site (built by web/build.py)
 REPORT.pdf                 technical report (4 pages)
 TEST_LOG.md                test results, accuracy and error analysis
 ```

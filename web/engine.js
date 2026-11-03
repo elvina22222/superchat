@@ -735,12 +735,79 @@ function createSuperChat(T) {
     }
     return TX.ambiguous[lang];
   }
+  // ------------------------------------------------------------------ bonus: visual search
+  // The browser classifies the photo (vision.js) into one of the catalogue's product types with a
+  // confidence; this turns that into a shopping result, or a question when the model is unsure.
+  const VIS = {
+    type: { headphones: { en: "headphones", az: "qulaqlıq", ru: "наушники" }, speaker: { en: "a speaker", az: "dinamik", ru: "колонка" },
+      laptops: { en: "a laptop", az: "noutbuk", ru: "ноутбук" }, phones: { en: "a smartphone", az: "smartfon", ru: "смартфон" },
+      wearables: { en: "a smartwatch", az: "ağıllı saat", ru: "умные часы" }, bags: { en: "a backpack", az: "çanta", ru: "рюкзак" },
+      shoes: { en: "running shoes", az: "qaçış ayaqqabısı", ru: "кроссовки" }, coffee: { en: "a coffee machine", az: "qəhvə maşını", ru: "кофемашина" },
+      games: { en: "a board game", az: "stolüstü oyun", ru: "настольная игра" } },
+    found: { en: "📷 This looks like {what} ({pct}% confidence).", az: "📷 Bu, deyəsən, {what} şəklidir ({pct}% əminliklə).", ru: "📷 Похоже, это {what} (уверенность {pct}%)." },
+    color: { en: " Main colour: {c}.", az: " Əsas rəng: {c}.", ru: " Основной цвет: {c}." },
+    unsure: { en: "📷 I’m not sure. It might be {what} ({pct}% confidence). Is that right? Reply “yes”, or tell me what it is.",
+      az: "📷 Əmin deyiləm: bəlkə də {what} ({pct}% əminlik). Düzdür? “Bəli” yazın və ya nə olduğunu deyin.",
+      ru: "📷 Я не уверен. Возможно, это {what} (уверенность {pct}%). Верно? Ответьте «да» или напишите, что это." },
+    none: { en: "📷 I couldn’t match this photo to anything in our catalogue (my best guess: “{guess}”, {pct}%). What product are you looking for?",
+      az: "📷 Bu şəkli kataloqdakı məhsulla uyğunlaşdıra bilmədim (ehtimal: “{guess}”, {pct}%). Hansı məhsulu axtarırsınız?",
+      ru: "📷 Не удалось сопоставить фото с товарами каталога (догадка: «{guess}», {pct}%). Какой товар вы ищете?" },
+  };
+  const fill = (s, kw) => s.replace(/\{(\w+)\}/g, (_, k) => kw[k]);
+  function showType(session, type, color, lang) {
+    const st = session.domains.shopping;
+    let [found] = sSearch({ type });
+    if (color) found = [...found.filter(p => p.color === color), ...found.filter(p => p.color !== color)];
+    if (Object.keys(st.query).length) {
+      st.history = st.history.filter(h => !sameQ(h.query, st.query)).slice(-5);
+      st.history.push({ query: st.query, results: st.results, selected: st.selected });
+    }
+    st.query = { type }; st.results = found.map(p => p.id); st.selected = found.length === 1 ? found[0].id : null;
+    session.last_domain = "shopping";
+    const lines = found.map((p, i) => pLine(i + 1, p, lang));
+    if (found.length > 1) lines.push(ss("pick_hint", lang));
+    return lines.join("\n");
+  }
+  function imageSearch(sessionId, result) {
+    // result: {type, confidence (0..1), guess (top ImageNet label), guessConfidence, color}
+    const session = getSession(sessionId), lang = session.lang || "en";
+    const pct = Math.round(result.confidence * 100);
+    let reply, category;
+    if (result.type && result.confidence >= 0.4) {
+      reply = fill(VIS.found[lang], { what: VIS.type[result.type][lang], pct }) +
+        (result.color && sSearch({ type: result.type })[0].some(p => p.color === result.color) ? fill(VIS.color[lang], { c: result.color }) : "") +
+        "\n" + showType(session, result.type, result.color, lang);
+      category = "shopping";
+    } else if (result.type && result.confidence >= 0.12) {
+      session.visual_pending = { type: result.type, color: result.color };
+      reply = fill(VIS.unsure[lang], { what: VIS.type[result.type][lang], pct });
+      category = "ambiguous";
+    } else {
+      session.pending = { text: "" };
+      reply = fill(VIS.none[lang], { guess: result.guess || "?", pct: Math.round((result.guessConfidence || 0) * 100) });
+      category = "ambiguous";
+    }
+    const turn = { user: "[photo]", reply, category, domains: category === "shopping" ? ["shopping"] : [], lang,
+      cues: ["image:" + (result.guess || "?"), "type:" + (result.confidence >= 0.12 ? result.type : "none"), "confidence:" + pct + "%"] };
+    session.history.push(turn);
+    return { ...turn, state: { lang: session.lang, last_domain: session.last_domain, preferences: session.preferences, domains: session.domains } };
+  }
+
   function handle(sessionId, message) {
     const session = getSession(sessionId);
     message = String(message || "").trim().slice(0, 1000);
     const lang = detectLanguage(message) || session.lang;
     session.lang = lang;
     let t = norm(message);
+    if (session.visual_pending) {                     // answer to "is it headphones?" after a photo
+      const vp = session.visual_pending; session.visual_pending = null;
+      if (has(t, "yes", "yeah", "yep", "correct", "right", "beli", "he\\b", "hə", "duzdur", "да\\b", "верно", "ага")) {
+        const reply = showType(session, vp.type, vp.color, lang);
+        const turn = { user: message, reply, category: "followup", domains: ["shopping"], lang, cues: ["visual-confirmed"] };
+        session.history.push(turn);
+        return { ...turn, state: { lang: session.lang, last_domain: session.last_domain, preferences: session.preferences, domains: session.domains } };
+      }
+    }
     if (session.pending) {
       const first = route(t, session);
       if (["flights", "shopping", "cinema", "followup"].includes(first.category) && t.split(" ").length <= 6) t = norm(session.pending.text) + " " + t;
@@ -770,7 +837,7 @@ function createSuperChat(T) {
     session.history.push(turn);
     return { ...turn, state: { lang: session.lang, last_domain: session.last_domain, preferences: session.preferences, domains: session.domains } };
   }
-  return { handle, route: (t, sid) => route(norm(t), getSession(sid)), reset: id => sessions.delete(id), getSession, norm };
+  return { handle, imageSearch, route: (t, sid) => route(norm(t), getSession(sid)), reset: id => sessions.delete(id), getSession, norm };
 }
 
 if (typeof module !== "undefined" && module.exports) module.exports = { createSuperChat };

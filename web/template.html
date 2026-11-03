@@ -46,6 +46,17 @@ form { display: flex; gap: 8px; padding-block: 12px; border-top: 1px solid var(-
 button { font: inherit; cursor: pointer; border-radius: 10px; }
 .send { padding: 10px 18px; border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .ghost { white-space: nowrap; padding: 7px 12px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding-block: 8px; border-top: 1px solid var(--line);
+  background: var(--panel); font-size: 13px; color: var(--muted);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.tools label { display: inline-flex; align-items: center; gap: 6px; }
+.tools select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
+#status { margin-left: auto; color: var(--accent); min-height: 1.2em; }
+.icon { width: 44px; flex: none; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 18px; padding: 0; }
+.icon[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+@media (prefers-reduced-motion: no-preference) { .icon[aria-pressed="true"] { animation: pulse 1.6s ease-in-out infinite; } }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent); } }
+.thumb { display: block; max-width: 180px; max-height: 180px; border-radius: 8px; margin-top: 4px; }
 aside { background: var(--panel); overflow-y: auto; padding: 16px; min-width: 0; }
 aside h2 { font: 600 11px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
 aside h2:first-child { margin-top: 0; }
@@ -66,8 +77,17 @@ pre { font: 11.5px/1.45 var(--mono); background: var(--bg); color: var(--fg); pa
       <button class="ghost" id="reset" type="button">New chat</button>
     </header>
     <div id="log" aria-live="polite"></div>
+    <div class="tools">
+      <label for="vlang">Voice language <select id="vlang"><option value="auto">Auto</option><option value="en-US">English</option>
+        <option value="az-AZ">Azərbaycan</option><option value="ru-RU">Русский</option></select></label>
+      <label for="speak"><input type="checkbox" id="speak"> Read replies aloud</label>
+      <span id="status" role="status"></span>
+    </div>
     <form id="f"><label for="q" hidden>Message</label>
-      <input id="q" autocomplete="off" placeholder="Ask about flights, products or films…">
+      <button class="icon" type="button" id="photo" title="Search by photo" aria-label="Search by photo">📷</button>
+      <input type="file" id="file" accept="image/*" hidden>
+      <button class="icon" type="button" id="mic" title="Hands-free voice: click once, then just speak" aria-label="Voice input" aria-pressed="false">🎤</button>
+      <input id="q" autocomplete="off" placeholder="Ask, speak, or send a photo…">
       <button class="send" type="submit">Send</button></form>
   </section>
   <aside>
@@ -84,6 +104,7 @@ pre { font: 11.5px/1.45 var(--mono); background: var(--bg); color: var(--fg); pa
 
 <script>/*TABLES*/</script>
 <script>/*ENGINE*/</script>
+<script src="web/vision/vision.js" onerror="this.remove(); var s=document.createElement('script'); s.src='vision/vision.js'; document.head.appendChild(s);"></script>
 <script>
 (function () {
   const bot = createSuperChat(window.SUPERCHAT_TABLES);
@@ -91,7 +112,8 @@ pre { font: 11.5px/1.45 var(--mono); background: var(--bg); color: var(--fg); pa
   const log = document.getElementById("log"), q = document.getElementById("q");
   const LABEL = { flights: "Flights", shopping: "Shopping", cinema: "Cinema", mixed: "Mixed", followup: "Follow-up",
     ambiguous: "Clarifying", out_of_scope: "Out of scope", greeting: "Hello" };
-  function add(text, who, r) {
+  const statusEl = document.getElementById("status"), status = m => { statusEl.textContent = m || ""; };
+  function add(text, who, r, imgUrl) {
     const d = document.createElement("div"); d.className = "msg " + who;
     if (r) {
       const t = document.createElement("span"), dom = r.domains.length === 1 ? r.domains[0] : "";
@@ -99,16 +121,92 @@ pre { font: 11.5px/1.45 var(--mono); background: var(--bg); color: var(--fg); pa
       t.textContent = r.category === "followup" ? "Follow-up · " + LABEL[dom] : (LABEL[r.category] || r.category);
       d.appendChild(t); d.appendChild(document.createElement("br"));
     }
-    d.appendChild(document.createTextNode(text)); log.appendChild(d); log.scrollTop = log.scrollHeight;
+    d.appendChild(document.createTextNode(text));
+    if (imgUrl) { const im = document.createElement("img"); im.src = imgUrl; im.alt = "Uploaded product photo"; im.className = "thumb"; d.appendChild(im); }
+    log.appendChild(d); log.scrollTop = log.scrollHeight;
   }
-  function send(text) {
-    add(text, "user");
-    const r = bot.handle(sid, text);
+  function showResult(r) {
     add(r.reply, "bot", r);
     document.getElementById("route").textContent = JSON.stringify({ category: r.category, domains: r.domains, language: r.lang, cues: r.cues }, null, 1);
     document.getElementById("state").textContent = JSON.stringify(r.state, null, 1);
+    speak(r.reply, r.lang);
   }
-  function welcome() { add("Hi! I can find flights, products and films — all in this one chat. Write in English, Azərbaycanca or по-русски.", "bot"); }
+  function send(text, byVoice) {
+    add((byVoice ? "🎤 " : "") + text, "user");
+    showResult(bot.handle(sid, text));
+  }
+
+  // ---- bonus: spoken replies (optional) ----
+  const speakBox = document.getElementById("speak");
+  const VOICE_LANG = { en: "en-US", az: "az-AZ", ru: "ru-RU" };
+  function speak(text, lang) {
+    if (!speakBox.checked || !("speechSynthesis" in window)) return;
+    const clean = text.replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF★→·•✅]/gu, " ").split("\n").slice(0, 4).join(". ");
+    const u = new SpeechSynthesisUtterance(clean);
+    u.lang = VOICE_LANG[lang] || "en-US";
+    u.onstart = () => pauseMic(true); u.onend = () => pauseMic(false);
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }
+
+  // ---- bonus: hands-free voice input with automatic start/end-of-speech detection ----
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micBtn = document.getElementById("mic"), vlang = document.getElementById("vlang");
+  let rec = null, listening = false, paused = false;
+  const recLang = () => vlang.value !== "auto" ? vlang.value : (VOICE_LANG[bot.getSession(sid).lang] || "en-US");
+  function startRec() {
+    rec = new SR(); rec.lang = recLang(); rec.continuous = true; rec.interimResults = true;
+    rec.onspeechstart = () => status("Hearing you…");
+    rec.onspeechend = () => status("Got it — thinking…");
+    rec.onresult = e => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) { const said = res[0].transcript.trim(); q.value = ""; if (said) send(said, true); status("Listening — just speak."); }
+        else interim += res[0].transcript;
+      }
+      if (interim) q.value = interim;
+    };
+    rec.onerror = e => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") { status("Microphone is blocked. Allow it in the browser, then try again."); stopMic(); }
+      else if (e.error === "network") status("Voice needs an internet connection.");
+    };
+    rec.onend = () => { if (listening && !paused) { try { rec.lang = recLang(); rec.start(); } catch (_) {} } };
+    rec.start();
+  }
+  function startMic() {
+    if (!SR) { status("Voice input works in Chrome or Edge. You can still type."); return; }
+    listening = true; micBtn.setAttribute("aria-pressed", "true"); status("Listening — just speak. Click 🎤 to stop.");
+    startRec();
+  }
+  function stopMic() { listening = false; micBtn.setAttribute("aria-pressed", "false"); if (rec) { try { rec.abort(); } catch (_) {} } if (!statusEl.textContent.startsWith("Microphone")) status(""); }
+  function pauseMic(on) {          // do not listen to our own spoken reply
+    if (!listening || !rec) return;
+    paused = on;
+    if (on) { try { rec.abort(); } catch (_) {} } else { try { rec.lang = recLang(); rec.start(); } catch (_) {} }
+  }
+  micBtn.addEventListener("click", () => listening ? stopMic() : startMic());
+
+  // ---- bonus: visual search ----
+  const fileIn = document.getElementById("file");
+  document.getElementById("photo").addEventListener("click", () => fileIn.click());
+  fileIn.addEventListener("change", async () => {
+    const f = fileIn.files && fileIn.files[0]; fileIn.value = "";
+    if (!f) return;
+    add("📷 Photo", "user", null, URL.createObjectURL(f));
+    if (!window.SuperVision) { add("Photo search is not available on this page.", "bot"); return; }
+    status("Loading the image model (first time only, about 25 MB)…");
+    try {
+      const res = await window.SuperVision.classify(f);
+      status("");
+      const r = bot.imageSearch(sid, res);
+      r.cues = [...r.cues, "top-5: " + res.top5.map(([l, p]) => `${l} ${Math.round(p * 100)}%`).join(", ")];
+      showResult(r);
+    } catch (e) {
+      console.error(e); status("");
+      add("Sorry, I couldn’t read that photo. Try another picture, or type what you are looking for.", "bot");
+    }
+  });
+  function welcome() { add("Hi! I can find flights, products and films — all in this one chat. Write in English, Azərbaycanca or по-русски, press 🎤 and just speak, or send a 📷 photo of a product.", "bot"); }
   document.getElementById("f").addEventListener("submit", e => { e.preventDefault(); const v = q.value.trim(); if (v) { q.value = ""; send(v); } q.focus(); });
   document.getElementById("reset").addEventListener("click", () => { bot.reset(sid); sid = "s" + Date.now(); log.innerHTML = "";
     document.getElementById("route").textContent = "Send a message to see how it was routed."; document.getElementById("state").textContent = "—"; welcome(); });
